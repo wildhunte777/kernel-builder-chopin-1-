@@ -4,7 +4,7 @@ env:
   TZ: Asia/Shanghai
 
   # ── 内核源码 ──
-  KERNEL_NAME: Chopin-A16-KVM-Proton-release
+  KERNEL_NAME: android_WeienKernel_xiaomi_chopin
   KERNEL_REPO: https://github.com/TheWeienKernelProject/android_WeienKernel_xiaomi_chopin
   KERNEL_BRANCH: chopin_kvm
   KERNEL_DEVICE: chopin
