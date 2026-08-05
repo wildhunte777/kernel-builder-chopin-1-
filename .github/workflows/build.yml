@@ -8,7 +8,7 @@ env:
   KERNEL_REPO: https://github.com/TheWeienKernelProject/android_WeienKernel_xiaomi_chopin
   KERNEL_BRANCH: main
   KERNEL_DEVICE: chopin
-  DEFCONFIG_NAME: vendor/chopin_user_defconfig
+  DEFCONFIG_NAME: chopin_user_defconfig
 
   # ── 工具链 ──
   # 实际工具链（AOSP Clang 12.0.5 r416183b，纯 LLVM 构建）
@@ -498,7 +498,7 @@ jobs:
             READELF=llvm-readelf \
             STRIP=llvm-strip \
             OBJSIZE=llvm-size \
-            ${{ env.DEFCONFIG_NAME }} vendor/addon.config    # ← 这里追加 vendor/addon.config
+            ${{ env.DEFCONFIG_NAME }} addon.config    # ← 这里追加 vendor/addon.config
 
       - name: 编译内核与设备树
         working-directory: ${{ env.KERNEL_NAME }}
