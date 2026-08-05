@@ -6,9 +6,9 @@ env:
   # ── 内核源码 ──
   KERNEL_NAME: android_WeienKernel_xiaomi_chopin
   KERNEL_REPO: https://github.com/TheWeienKernelProject/android_WeienKernel_xiaomi_chopin
-  KERNEL_BRANCH: chopin_kvm
+  KERNEL_BRANCH: main
   KERNEL_DEVICE: chopin
-  DEFCONFIG_NAME: chopin_defconfig
+  #DEFCONFIG_NAME: chopin_defconfig
 
   # ── 工具链 ──
   # 实际工具链（AOSP Clang 12.0.5 r416183b，纯 LLVM 构建）
