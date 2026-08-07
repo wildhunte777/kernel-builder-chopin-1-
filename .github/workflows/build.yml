@@ -4,11 +4,11 @@ env:
   TZ: Asia/Shanghai
 
   # ── 内核源码 ──
-  KERNEL_NAME: android_WeienKernel_xiaomi_chopin
-  KERNEL_REPO: https://github.com/TheWeienKernelProject/android_WeienKernel_xiaomi_chopin
-  KERNEL_BRANCH: main
+  KERNEL_NAME: Chopin-A16-KVM-Proton-release
+  KERNEL_REPO: https://github.com/ChopinKernels/android_kernel_chopin_android_T
+  KERNEL_BRANCH: T
   KERNEL_DEVICE: chopin
-  DEFCONFIG_NAME: chopin_user_defconfig
+  DEFCONFIG_NAME: chopin_defconfig
 
   # ── 工具链 ──
   # 实际工具链（AOSP Clang 12.0.5 r416183b，纯 LLVM 构建）
@@ -479,6 +479,7 @@ jobs:
             CC_CMD="clang"
           fi
 
+          # 如果未开启伪装且提供了后缀，将其作为内部版本号后缀
           if [[ "${{ inputs.fake_enabled }}" != "true" && -n "${{ inputs.kernel_suffix }}" ]]; then
             export LOCALVERSION="-${{ inputs.kernel_suffix }}"
           fi
@@ -498,7 +499,7 @@ jobs:
             READELF=llvm-readelf \
             STRIP=llvm-strip \
             OBJSIZE=llvm-size \
-            ${{ env.DEFCONFIG_NAME }} addon.config    # ← 这里追加 vendor/addon.config
+            ${{ env.DEFCONFIG_NAME }}
 
       - name: 编译内核与设备树
         working-directory: ${{ env.KERNEL_NAME }}
