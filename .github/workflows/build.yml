@@ -332,15 +332,14 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_PATH=y
           CONFIG_KSU_SUSFS_SUS_MOUNT=y
           CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SUS_MAP=n
+          CONFIG_KSU_SUSFS_SUS_MAP=y
           CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-          CONFIG_KSU_SUSFS_SPOOF_UNAME=n
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
           # 4.14 non-GKI 禁用以下选项（会导致 bootloop 或不兼容）
           # CONFIG_KSU_SUSFS_SUS_SU is not set
-          # CONFIG_KSU_SUSFS_MNT_ID_REORDER is not set
-          EOF
+          CONFIG_KSU_SUSFS_MNT_ID_REORDER = y
             echo "[+] SUSFS 配置写入完成"
           fi
 
