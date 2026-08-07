@@ -247,7 +247,9 @@ jobs:
 
           echo -e "CONFIG_KSU=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           echo -e "CONFIG_KSU_MANUAL_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-          echo -e "CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+          # 注意：当 SUSFS 启用时，ReSukiSU 自动使用 SuSFS Inline Hook
+          # AUTO_INPUT_HOOK 与 SuSFS Inline Hook 不兼容，会导致 inline_hook_check.mk 失败
+          # echo -e "CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           echo -e "CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           echo -e "CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           echo -e "CONFIG_KSU_MULTI_MANAGER_SUPPORT=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
