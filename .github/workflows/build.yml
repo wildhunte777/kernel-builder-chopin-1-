@@ -345,7 +345,28 @@ jobs:
           fi
 
           echo "[+] SUSFS 集成完成"
-
+          # 8) 收集可能的 .rej 文件用于调试
+          echo "[+] 检查是否有 .rej 文件 ..."
+          REJ_DIR="${{ github.workspace }}/susfs_rejects"
+          mkdir -p "$REJ_DIR"
+          find . -name "*.rej" -type f | while read -r rej; do
+            echo "  发现 reject 文件: $rej"
+            cp -v "$rej" "$REJ_DIR/"
+          done
+          if [ "$(ls -A "$REJ_DIR")" ]; then
+            echo "::warning::发现补丁冲突，.rej 文件已收集到 $REJ_DIR"
+          else
+            echo "[+] 无补丁冲突"
+          fi
+            # ── 6.6 上传 SUSFS 补丁冲突文件（仅失败时） ──
+      - name: 上传 SUSFS reject 文件
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: susfs-rejects-${{ github.run_id }}
+          path: ${{ github.workspace }}/susfs_rejects/
+          if-no-files-found: ignore
+          retention-days: 7
       # ── 7. 集成 Droidspaces 支持 ──
       - name: 集成 Droidspaces 支持
         if: inputs.droidspaces_enabled
