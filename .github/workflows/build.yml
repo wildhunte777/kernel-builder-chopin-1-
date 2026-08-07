@@ -373,9 +373,8 @@ jobs:
           else
             echo "[+] 无补丁冲突"
           fi
-            # ── 6.6 上传 SUSFS 补丁冲突文件（仅失败时） ──
       - name: 上传 SUSFS reject 文件
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: susfs-rejects-${{ github.run_id }}
