@@ -313,23 +313,20 @@ jobs:
           if [ "$(ls -A "$REJ_DIR")" ]; then
             echo "::warning::发现非关键补丁冲突，.rej 文件已收集"
           fi
-          # 3) 应用 KernelSU 侧补丁
-          echo "[+] 应用 KernelSU 侧补丁 (10_enable_susfs_for_ksu.patch) ..."
-          if [ -f "$SUSFS_SRC/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
-            if git apply --check "$SUSFS_SRC/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" >/dev/null 2>&1; then
-              git apply "$SUSFS_SRC/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
+                    # 3) 应用 KernelSU 侧补丁（仅标准 KernelSU 需要，ReSukiSU 已内置）
+          echo "[+] 检查是否需要 KernelSU 侧补丁 ..."
+          if [ -f "kernel/core_hook.c" ] && [ -f "kernel/ksu.c" ]; then
+            echo "[+] 检测到标准 KernelSU，应用 SUSFS KernelSU 侧补丁 ..."
+            KSU_PATCH="$SUSFS_SRC/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
+            if git apply --check "$KSU_PATCH" >/dev/null 2>&1; then
+              git apply "$KSU_PATCH"
               echo "[+] KernelSU 补丁应用成功"
             else
-              echo "::warning::KernelSU 补丁无法干净应用，尝试强制应用 ..."
-              git apply --reject "$SUSFS_SRC/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || {
-                echo "::error::SUSFS KernelSU 补丁应用失败"
-                exit 1
-              }
+              echo "::warning::KernelSU 补丁无法应用，跳过"
             fi
           else
-            echo "::warning::未找到 KernelSU 侧 SUSFS 补丁，跳过"
+            echo "[+] 检测到 ReSukiSU（已内置 SUSFS 支持），跳过 KernelSU 侧补丁"
           fi
-
           # 4) 修改 fs/Makefile 添加 susfs.o
           echo "[+] 修改 fs/Makefile ..."
           if ! grep -q "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" fs/Makefile; then
