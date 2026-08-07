@@ -336,31 +336,30 @@ jobs:
             echo "[+] fs/Makefile 已包含 susfs.o，跳过"
           fi
 
-          # 5) 追加 SUSFS 内核配置（4.14 非 GKI 安全选项）
+          # 7) 追加 SUSFS 内核配置
           echo "[+] 写入 SUSFS 内核配置 ..."
           DEFCONFIG="arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}"
           if grep -q "CONFIG_KSU_SUSFS=y" "$DEFCONFIG" 2>/dev/null; then
             echo "[+] SUSFS 配置已存在，跳过"
           else
-            cat >> "$DEFCONFIG" <<- 'EOF'
-
-         # ===== SUSFS support (4.14 non-GKI) =====
-CONFIG_KSU_SUSFS=y
-CONFIG_KSU_SUSFS_SUS_PATH=y
-CONFIG_KSU_SUSFS_SUS_MOUNT=y
-CONFIG_KSU_SUSFS_SUS_KSTAT=y
-CONFIG_KSU_SUSFS_SUS_MAP=y
-CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
-# 4.14 non-GKI 禁用以下选项（会导致 bootloop 或不兼容）
-# CONFIG_KSU_SUSFS_SUS_SU is not set
-# CONFIG_KSU_SUSFS_MNT_ID_REORDER is not set
-EOF
-          echo "[+] SUSFS 配置写入完成"
-        fi
-          echo "[+] SUSFS 集成完成"
+            {
+              echo ""
+              echo "# ===== SUSFS support (4.14 non-GKI) ====="
+              echo "CONFIG_KSU_SUSFS=y"
+              echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
+              echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
+              echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
+              echo "CONFIG_KSU_SUSFS_SUS_MAP=y"
+              echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y"
+              echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
+              echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
+              echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y"
+              echo "# 4.14 non-GKI 禁用以下选项（会导致 bootloop 或不兼容）"
+              echo "# CONFIG_KSU_SUSFS_SUS_SU is not set"
+              echo "CONFIG_KSU_SUSFS_MNT_ID_REORDER=y"
+            } >> "$DEFCONFIG"
+            echo "[+] SUSFS 配置写入完成"
+          fi
           # 8) 收集可能的 .rej 文件用于调试
           echo "[+] 检查是否有 .rej 文件 ..."
           REJ_DIR="${{ github.workspace }}/susfs_rejects"
