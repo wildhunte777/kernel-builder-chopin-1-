@@ -5,7 +5,7 @@ env:
 
   # ── 内核源码 ──
   KERNEL_NAME: Chopin-A16-KVM-Proton-release
-  KERNEL_REPO: https://wildhunte/kernel_mt6893
+  KERNEL_REPO: https://wildhunte777/kernel_mt6893
   KERNEL_BRANCH: chopin_kvm
   KERNEL_DEVICE: chopin
   DEFCONFIG_NAME: chopin_defconfig
