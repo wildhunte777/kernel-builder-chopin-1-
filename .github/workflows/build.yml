@@ -386,91 +386,151 @@ jobs:
           path: ${{ github.workspace }}/susfs_rejects/
           if-no-files-found: ignore
           retention-days: 7
-                # ── 6.8 清理与 SuSFS Inline Hook 冲突的 Manual Hook 残留 ──
-      - name: 清理 Manual Hook 残留
+                      # ── 6.8 清理 Manual Hook 残留并补全 Required Hooks ──
+      - name: 清理 Manual Hook 并补全 Required Hooks
         if: inputs.ksu_enabled && inputs.susfs_enabled
         working-directory: ${{ env.KERNEL_NAME }}
         run: |
-          echo "[+] 扫描并清理与 SuSFS Inline Hook 冲突的 Manual Hook ..."
-
-          cleanup_ksu_hook() {
-            local file="$1"
-            if [ ! -f "$file" ]; then
-              return
-            fi
-            if ! grep -q "ksu_" "$file" 2>/dev/null; then
-              return
-            fi
-
-            echo "  发现 $file 存在 ksu_ hook，正在清理 ..."
-
-            python3 - "$file" << 'PYEOF'
+          echo "[+] 处理内核源码中的 hook 兼容性问题 ..."
+          
+          # 将 Python 脚本写入临时文件，避免 YAML heredoc 转义问题
+          cat > /tmp/fix_hooks.py << 'EOF'
           import re
-          import sys
-
-          file = sys.argv[1]
-          with open(file, 'r') as f:
-              content = f.read()
-
-          # 策略1：删除 extern 声明块
-          content = re.sub(
-              r'#\s*ifdef\s+CONFIG_KSU\s*\n'
-              r'(?:\s*extern\s+bool\s+ksu_[^_]*_hook\s+__read_mostly;\s*\n'
-              r'|\s*extern\s+int\s+ksu_handle_[^(]*\([^)]*\);\s*\n'
-              r')+'
-              r'#\s*endif\s*\n?',
-              '', content
-          )
-
-          # 策略2：删除调用块
-          content = re.sub(
-              r'#\s*ifdef\s+CONFIG_KSU\s*\n'
-              r'\s*if\s*\(\s*unlikely\s*\(\s*ksu_[^(]*\)\s*\)\s*\n'
-              r'\s*ksu_handle_[^(]*\([^)]*\);\s*\n'
-              r'#\s*endif\s*\n?',
-              '', content
-          )
-
-          # 策略3：清理可能残留的单独行
-          lines = content.split('\n')
-          cleaned = []
-          for line in lines:
-              if 'ksu_input_hook' in line or 'ksu_handle_input_handle_event' in line:
-                  continue
-              if 'ksu_execveat_hook' in line or 'ksu_handle_execveat' in line:
-                  continue
-              if 'ksu_open_hook' in line or 'ksu_handle_open' in line:
-                  continue
-              if 'ksu_stat_hook' in line or 'ksu_handle_stat' in line:
-                  continue
-              if 'ksu_read_hook' in line or 'ksu_handle_read' in line:
-                  continue
-              if 'ksu_setuid_hook' in line or 'ksu_handle_setuid' in line:
-                  continue
-              if 'ksu_prctl_hook' in line or 'ksu_handle_prctl' in line:
-                  continue
-              cleaned.append(line)
-          content = '\n'.join(cleaned)
-
-          with open(file, 'w') as f:
-              f.write(content)
-          PYEOF
-
-            if grep -q "ksu_" "$file" 2>/dev/null; then
-              echo "::warning::$file 清理后仍有 ksu_ 残留，请手动检查"
-            else
-              echo "  $file 清理完成"
-            fi
+          import os
+          
+          INCOMPATIBLE_HOOKS = [
+              'ksu_input_hook', 'ksu_execveat_hook', 
+              'ksu_init_rc_hook', 'ksu_vfs_read_hook'
+          ]
+          
+          REQUIRED_HOOKS = {
+              'fs/exec.c': 'ksu_handle_execveat',
+              'fs/open.c': 'ksu_handle_faccessat',
+              'fs/stat.c': 'ksu_handle_stat',
+              'fs/read_write.c': 'ksu_handle_sys_read',
+              'kernel/reboot.c': 'ksu_handle_sys_reboot',
+              'kernel/sys.c': 'ksu_handle_setresuid',
+              'drivers/input/input.c': 'ksu_handle_input_handle_event',
           }
-
-          cleanup_ksu_hook "drivers/input/input.c"
-          cleanup_ksu_hook "fs/exec.c"
-          cleanup_ksu_hook "fs/open.c"
-          cleanup_ksu_hook "fs/stat.c"
-          cleanup_ksu_hook "fs/read_write.c"
-          cleanup_ksu_hook "kernel/sys.c"
-
-          echo "[+] Manual Hook 清理完成"
+          
+          def remove_incompatible(content):
+              for hook in INCOMPATIBLE_HOOKS:
+                  content = re.sub(r'\s*extern\s+bool\s+' + hook + r'\s+__read_mostly;\s*\n', '\n', content)
+                  content = re.sub(r'\s*if\s*\(\s*unlikely\s*\(\s*' + hook + r'\s*\)\s*\)\s*\n\s*ksu_handle_[^(]*\([^)]*\);\s*\n', '\n', content)
+              return content
+          
+          def fix_guards(content):
+              return content.replace('CONFIG_KSU_MANUAL_HOOK', 'CONFIG_KSU')
+          
+          def patch_file(filepath, pattern, hook_code):
+              if not os.path.exists(filepath):
+                  return
+              with open(filepath, 'r') as f:
+                  content = f.read()
+              
+              required = REQUIRED_HOOKS.get(filepath)
+              if required and required not in content:
+                  print(f'  补全 {filepath} 的 {required} ...')
+                  content = re.sub(pattern, hook_code, content)
+              
+              content = remove_incompatible(content)
+              content = fix_guards(content)
+              
+              with open(filepath, 'w') as f:
+                  f.write(content)
+          
+          patch_file('fs/exec.c', 
+              r'(static\s+int\s+do_execveat_common\s*\([^)]*\)\s*\{)',
+              r'''\1
+          #ifdef CONFIG_KSU
+          \textern int ksu_handle_execveat(int fd, struct filename *filename, void *argv, void *envp, int flags);
+          \tif (ksu_handle_execveat(fd, filename, argv, envp, flags))
+          \t\treturn 0;
+          #endif
+          ''')
+          
+          patch_file('fs/open.c',
+              r'(long\s+do_faccessat\s*\([^)]*\)\s*\{)',
+              r'''\1
+          #ifdef CONFIG_KSU
+          \textern int ksu_handle_faccessat(int dfd, const char __user *filename, int mode);
+          \tif (ksu_handle_faccessat(dfd, filename, mode))
+          \t\treturn 0;
+          #endif
+          ''')
+          
+          patch_file('fs/stat.c',
+              r'(int\s+vfs_statx\s*\([^)]*\)\s*\{)',
+              r'''\1
+          #ifdef CONFIG_KSU
+          \textern int ksu_handle_stat(int dfd, const char __user *filename, int flags);
+          \tif (ksu_handle_stat(dfd, filename, flags))
+          \t\treturn 0;
+          #endif
+          ''')
+          
+          patch_file('fs/read_write.c',
+              r'(ssize_t\s+vfs_read\s*\([^)]*\)\s*\{)',
+              r'''\1
+          #ifdef CONFIG_KSU
+          \textern int ksu_handle_sys_read(unsigned int fd, char __user *buf, size_t count);
+          \tif (ksu_handle_sys_read(fd, buf, count))
+          \t\treturn 0;
+          #endif
+          ''')
+          
+          patch_file('kernel/reboot.c',
+              r'(SYSCALL_DEFINE4\s*\(\s*reboot\s*,\s*int\s*,\s*magic1\s*,\s*int\s*,\s*magic2\s*,\s*unsigned\s+int\s*,\s*cmd\s*,\s*void\s+__user\s*\*\s*,\s*arg\s*\)\s*\{)',
+              r'''\1
+          #ifdef CONFIG_KSU
+          \textern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user *arg);
+          \tif (ksu_handle_sys_reboot(magic1, magic2, cmd, arg))
+          \t\treturn 0;
+          #endif
+          ''')
+          
+          patch_file('drivers/input/input.c',
+              r'(void\s+input_event\s*\([^)]*\)\s*\{)',
+              r'''\1
+          #ifdef CONFIG_KSU
+          \textern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
+          \tif (ksu_handle_input_handle_event(&type, &code, &value))
+          \t\treturn;
+          #endif
+          ''')
+          
+          # kernel/sys.c - 只清理 guard 和 incompatible，不补全（已有专门步骤 6.9）
+          if os.path.exists('kernel/sys.c'):
+              with open('kernel/sys.c', 'r') as f:
+                  content = f.read()
+              content = remove_incompatible(content)
+              content = fix_guards(content)
+              with open('kernel/sys.c', 'w') as f:
+                  f.write(content)
+          
+          print('[+] 处理完成')
+          EOF
+          
+          python3 /tmp/fix_hooks.py
+          
+          echo "[+] 验证 required hooks ..."
+          for file in fs/exec.c fs/open.c fs/stat.c fs/read_write.c kernel/reboot.c kernel/sys.c drivers/input/input.c; do
+            [ -f "$file" ] || continue
+            case $file in
+              fs/exec.c) expected="ksu_handle_execveat" ;;
+              fs/open.c) expected="ksu_handle_faccessat" ;;
+              fs/stat.c) expected="ksu_handle_stat" ;;
+              fs/read_write.c) expected="ksu_handle_sys_read" ;;
+              kernel/reboot.c) expected="ksu_handle_sys_reboot" ;;
+              kernel/sys.c) expected="ksu_handle_setresuid" ;;
+              drivers/input/input.c) expected="ksu_handle_input_handle_event" ;;
+            esac
+            if grep -q "$expected" "$file"; then
+              echo "  ✅ $file: $expected"
+            else
+              echo "  ❌ $file: $expected 缺失"
+            fi
+          done
            # ── 6.9 修补 kernel/sys.c 缺失的 ksu_handle_setresuid hook ──
       - name: 修补 kernel/sys.c setresuid hook
         if: inputs.ksu_enabled && inputs.susfs_enabled
