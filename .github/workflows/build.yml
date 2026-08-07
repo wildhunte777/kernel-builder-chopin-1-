@@ -5,7 +5,7 @@ env:
 
   # ── 内核源码 ──
   KERNEL_NAME: Chopin-A16-KVM-Proton-release
-  KERNEL_REPO: https://github.com/seriaTvT/kernel_mt6893
+  KERNEL_REPO: https://wildhunte/kernel_mt6893
   KERNEL_BRANCH: chopin_kvm
   KERNEL_DEVICE: chopin
   DEFCONFIG_NAME: chopin_defconfig
@@ -282,17 +282,30 @@ jobs:
 
           # 2) 应用内核侧补丁
           echo "[+] 应用内核侧补丁 (50_add_susfs_in_kernel-4.14.patch) ..."
-          if git apply --check "$SUSFS_SRC/kernel_patches/50_add_susfs_in_kernel-4.14.patch" >/dev/null 2>&1; then
-            git apply "$SUSFS_SRC/kernel_patches/50_add_susfs_in_kernel-4.14.patch"
+          PATCH_OK=0
+          if git apply --check "$PATCH_TMP" >/dev/null 2>&1; then
+            git apply "$PATCH_TMP"
             echo "[+] 内核补丁应用成功"
+            PATCH_OK=1
           else
             echo "::warning::内核补丁无法干净应用，尝试强制应用 ..."
-            git apply --reject "$SUSFS_SRC/kernel_patches/50_add_susfs_in_kernel-4.14.patch" || {
-              echo "::error::SUSFS 内核补丁应用失败，请检查源码兼容性"
-              exit 1
-            }
+            git apply --reject "$PATCH_TMP" || true  # ← 加 || true，不要退出
+            echo "::error::SUSFS 内核补丁应用失败，请检查源码兼容性"
           fi
 
+          # 2.5) 无论成功与否，先收集 .rej 文件
+          echo "[+] 检查 .rej 文件 ..."
+          REJ_DIR="${{ github.workspace }}/susfs_rejects"
+          mkdir -p "$REJ_DIR"
+          find . -name "*.rej" -type f | while read -r rej; do
+            echo "  发现 reject: $rej"
+            cp -v "$rej" "$REJ_DIR/"
+          done
+
+          # 如果补丁失败，在这里退出
+          if [ "$PATCH_OK" -ne 1 ]; then
+            exit 1
+          fi
           # 3) 应用 KernelSU 侧补丁
           echo "[+] 应用 KernelSU 侧补丁 (10_enable_susfs_for_ksu.patch) ..."
           if [ -f "$SUSFS_SRC/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
