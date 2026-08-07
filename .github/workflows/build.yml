@@ -386,32 +386,22 @@ jobs:
           path: ${{ github.workspace }}/susfs_rejects/
           if-no-files-found: ignore
           retention-days: 7
-                      # ── 6.8 清理 Manual Hook 残留并补全 Required Hooks ──
+      # ── 6.8 清理 Manual Hook 残留并补全 Required Hooks ──
       - name: 清理 Manual Hook 并补全 Required Hooks
         if: inputs.ksu_enabled && inputs.susfs_enabled
         working-directory: ${{ env.KERNEL_NAME }}
         run: |
           echo "[+] 处理内核源码中的 hook 兼容性问题 ..."
           
-          # 将 Python 脚本写入临时文件，避免 YAML heredoc 转义问题
-          cat > /tmp/fix_hooks.py << 'EOF'
+          cat > /tmp/fix_hooks.py << 'PYEOF'
           import re
           import os
+          import sys
           
           INCOMPATIBLE_HOOKS = [
               'ksu_input_hook', 'ksu_execveat_hook', 
               'ksu_init_rc_hook', 'ksu_vfs_read_hook'
           ]
-          
-          REQUIRED_HOOKS = {
-              'fs/exec.c': 'ksu_handle_execveat',
-              'fs/open.c': 'ksu_handle_faccessat',
-              'fs/stat.c': 'ksu_handle_stat',
-              'fs/read_write.c': 'ksu_handle_sys_read',
-              'kernel/reboot.c': 'ksu_handle_sys_reboot',
-              'kernel/sys.c': 'ksu_handle_setresuid',
-              'drivers/input/input.c': 'ksu_handle_input_handle_event',
-          }
           
           def remove_incompatible(content):
               for hook in INCOMPATIBLE_HOOKS:
@@ -422,98 +412,171 @@ jobs:
           def fix_guards(content):
               return content.replace('CONFIG_KSU_MANUAL_HOOK', 'CONFIG_KSU')
           
-          def patch_file(filepath, pattern, hook_code):
+          def patch_file(filepath, required_hook, insert_fn):
               if not os.path.exists(filepath):
                   return
               with open(filepath, 'r') as f:
                   content = f.read()
               
-              required = REQUIRED_HOOKS.get(filepath)
-              if required and required not in content:
-                  print(f'  补全 {filepath} 的 {required} ...')
-                  content = re.sub(pattern, hook_code, content)
+              if required_hook in content:
+                  # 已存在，只清理 incompatible 和 guard
+                  content = remove_incompatible(content)
+                  content = fix_guards(content)
+                  with open(filepath, 'w') as f:
+                      f.write(content)
+                  print(f'  {filepath}: {required_hook} 已存在，已清理 incompatible')
+                  return
               
+              # 缺失，需要插入
+              print(f'  补全 {filepath} 的 {required_hook} ...')
+              content = insert_fn(content)
               content = remove_incompatible(content)
               content = fix_guards(content)
-              
               with open(filepath, 'w') as f:
                   f.write(content)
+              print(f'  {filepath}: {required_hook} 已插入')
           
-          patch_file('fs/exec.c', 
-              r'(static\s+int\s+do_execveat_common\s*\([^)]*\)\s*\{)',
-              r'''\1
+          # ===== fs/exec.c: ksu_handle_execveat =====
+          def insert_execveat(content):
+              pattern = r'(static\s+int\s+do_execveat_common\s*\([^)]*\)\s*\{)'
+              hook = '''\\1
           #ifdef CONFIG_KSU
           \textern int ksu_handle_execveat(int fd, struct filename *filename, void *argv, void *envp, int flags);
           \tif (ksu_handle_execveat(fd, filename, argv, envp, flags))
           \t\treturn 0;
           #endif
-          ''')
+          '''
+              if not re.search(pattern, content):
+                  print("::error::无法在 fs/exec.c 中找到 do_execveat_common")
+                  sys.exit(1)
+              return re.sub(pattern, hook, content, count=1)
           
-          patch_file('fs/open.c',
-              r'(long\s+do_faccessat\s*\([^)]*\)\s*\{)',
-              r'''\1
+          # ===== fs/open.c: ksu_handle_faccessat =====
+          def insert_faccessat(content):
+              # 尝试多种可能的函数名
+              for func_name in ['do_faccessat', 'sys_faccessat', 'SYSCALL_DEFINE3(faccessat,']:
+                  pattern = rf'({re.escape(func_name)}[^{{]*\{{)'
+                  if re.search(pattern, content):
+                      hook = '''\\1
           #ifdef CONFIG_KSU
           \textern int ksu_handle_faccessat(int dfd, const char __user *filename, int mode);
           \tif (ksu_handle_faccessat(dfd, filename, mode))
           \t\treturn 0;
           #endif
-          ''')
+          '''
+                      return re.sub(pattern, hook, content, count=1)
+              print("::error::无法在 fs/open.c 中找到 faccessat 函数")
+              sys.exit(1)
           
-          patch_file('fs/stat.c',
-              r'(int\s+vfs_statx\s*\([^)]*\)\s*\{)',
-              r'''\1
+          # ===== fs/stat.c: ksu_handle_stat =====
+          def insert_stat(content):
+              for func_name in ['vfs_statx', 'SYSCALL_DEFINE4(newfstatat,', 'SYSCALL_DEFINE2(stat,']:
+                  pattern = rf'({re.escape(func_name)}[^{{]*\{{)'
+                  if re.search(pattern, content):
+                      hook = '''\\1
           #ifdef CONFIG_KSU
           \textern int ksu_handle_stat(int dfd, const char __user *filename, int flags);
           \tif (ksu_handle_stat(dfd, filename, flags))
           \t\treturn 0;
           #endif
-          ''')
+          '''
+                      return re.sub(pattern, hook, content, count=1)
+              print("::error::无法在 fs/stat.c 中找到 stat 函数")
+              sys.exit(1)
           
-          patch_file('fs/read_write.c',
-              r'(ssize_t\s+vfs_read\s*\([^)]*\)\s*\{)',
-              r'''\1
-          #ifdef CONFIG_KSU
-          \textern int ksu_handle_sys_read(unsigned int fd, char __user *buf, size_t count);
-          \tif (ksu_handle_sys_read(fd, buf, count))
-          \t\treturn 0;
-          #endif
-          ''')
+          # ===== fs/read_write.c: ksu_handle_sys_read =====
+          def insert_sys_read(content):
+              # 4.14 应该在 SYSCALL_DEFINE3(read, ...) 或 ksys_read 中插入
+              # 优先尝试 SYSCALL_DEFINE3(read,
+              pattern = r'(SYSCALL_DEFINE3\s*\(\s*read\s*,\s*unsigned\s+int\s*,\s*fd\s*,[^)]*\)\s*\{)'
+              if re.search(pattern, content):
+                  hook = '''\\1
+          \t#ifdef CONFIG_KSU
+          \textern int ksu_handle_sys_read(unsigned int fd, char __user **buf, size_t *count);
+          \tif (ksu_handle_sys_read(fd, &buf, &count)) {
+          \t\tfdput(f);
+          \t\treturn -EFAULT;
+          \t}
+          \t#endif
+          '''
+                  return re.sub(pattern, hook, content, count=1)
+              
+              # 尝试 ksys_read
+              pattern = r'(ssize_t\s+ksys_read\s*\(\s*unsigned\s+int\s+fd[^)]*\)\s*\{)'
+              if re.search(pattern, content):
+                  hook = '''\\1
+          \t#ifdef CONFIG_KSU
+          \textern int ksu_handle_sys_read(unsigned int fd, char __user **buf, size_t *count);
+          \tif (ksu_handle_sys_read(fd, &buf, &count)) {
+          \t\tfdput(f);
+          \t\treturn -EFAULT;
+          \t}
+          \t#endif
+          '''
+                  return re.sub(pattern, hook, content, count=1)
+              
+              print("::error::无法在 fs/read_write.c 中找到 read/ksys_read 函数")
+              sys.exit(1)
           
-          patch_file('kernel/reboot.c',
-              r'(SYSCALL_DEFINE4\s*\(\s*reboot\s*,\s*int\s*,\s*magic1\s*,\s*int\s*,\s*magic2\s*,\s*unsigned\s+int\s*,\s*cmd\s*,\s*void\s+__user\s*\*\s*,\s*arg\s*\)\s*\{)',
-              r'''\1
+          # ===== kernel/reboot.c: ksu_handle_sys_reboot =====
+          def insert_reboot(content):
+              pattern = r'(SYSCALL_DEFINE4\s*\(\s*reboot\s*,\s*int\s*,\s*magic1\s*,[^)]*\)\s*\{)'
+              if re.search(pattern, content):
+                  hook = '''\\1
           #ifdef CONFIG_KSU
           \textern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user *arg);
           \tif (ksu_handle_sys_reboot(magic1, magic2, cmd, arg))
           \t\treturn 0;
           #endif
-          ''')
+          '''
+                  return re.sub(pattern, hook, content, count=1)
+              print("::error::无法在 kernel/reboot.c 中找到 reboot 函数")
+              sys.exit(1)
           
-          patch_file('drivers/input/input.c',
-              r'(void\s+input_event\s*\([^)]*\)\s*\{)',
-              r'''\1
+          # ===== drivers/input/input.c: ksu_handle_input_handle_event =====
+          def insert_input(content):
+              pattern = r'(void\s+input_event\s*\([^)]*\)\s*\{)'
+              if re.search(pattern, content):
+                  hook = '''\\1
           #ifdef CONFIG_KSU
           \textern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
           \tif (ksu_handle_input_handle_event(&type, &code, &value))
           \t\treturn;
           #endif
-          ''')
+          '''
+                  return re.sub(pattern, hook, content, count=1)
+              print("::error::无法在 drivers/input/input.c 中找到 input_event")
+              sys.exit(1)
           
-          # kernel/sys.c - 只清理 guard 和 incompatible，不补全（已有专门步骤 6.9）
+          # ===== kernel/sys.c: 只清理，不插入（由步骤 6.9 处理）=====
+          def clean_sys_c(content):
+              content = remove_incompatible(content)
+              content = fix_guards(content)
+              return content
+          
+          # 执行修补
+          patch_file('fs/exec.c', 'ksu_handle_execveat', insert_execveat)
+          patch_file('fs/open.c', 'ksu_handle_faccessat', insert_faccessat)
+          patch_file('fs/stat.c', 'ksu_handle_stat', insert_stat)
+          patch_file('fs/read_write.c', 'ksu_handle_sys_read', insert_sys_read)
+          patch_file('kernel/reboot.c', 'ksu_handle_sys_reboot', insert_reboot)
+          patch_file('drivers/input/input.c', 'ksu_handle_input_handle_event', insert_input)
+          
           if os.path.exists('kernel/sys.c'):
               with open('kernel/sys.c', 'r') as f:
                   content = f.read()
-              content = remove_incompatible(content)
-              content = fix_guards(content)
+              content = clean_sys_c(content)
               with open('kernel/sys.c', 'w') as f:
                   f.write(content)
+              print('  kernel/sys.c: 已清理')
           
           print('[+] 处理完成')
-          EOF
+          PYEOF
           
           python3 /tmp/fix_hooks.py
           
           echo "[+] 验证 required hooks ..."
+          all_ok=true
           for file in fs/exec.c fs/open.c fs/stat.c fs/read_write.c kernel/reboot.c kernel/sys.c drivers/input/input.c; do
             [ -f "$file" ] || continue
             case $file in
@@ -529,8 +592,14 @@ jobs:
               echo "  ✅ $file: $expected"
             else
               echo "  ❌ $file: $expected 缺失"
+              all_ok=false
             fi
           done
+          
+          if [ "$all_ok" = false ]; then
+            echo "::error::部分 required hook 缺失，编译将失败"
+            exit 1
+          fi
            # ── 6.9 修补 kernel/sys.c 缺失的 ksu_handle_setresuid hook ──
       - name: 修补 kernel/sys.c setresuid hook
         if: inputs.ksu_enabled && inputs.susfs_enabled
