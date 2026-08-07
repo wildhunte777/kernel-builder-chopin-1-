@@ -232,7 +232,7 @@ jobs:
           fi
 
       # ── 6. 集成 ReSukiSU ──
-      - name: 集成 ReSukiSU (Manual Hook)
+      - name: 集成 ReSukiSU
         if: inputs.ksu_enabled
         working-directory: ${{ env.KERNEL_NAME }}
         run: |
@@ -246,12 +246,15 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
 
           echo -e "CONFIG_KSU=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-          echo -e "CONFIG_KSU_MANUAL_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-          # 注意：当 SUSFS 启用时，ReSukiSU 自动使用 SuSFS Inline Hook
-          # AUTO_INPUT_HOOK 与 SuSFS Inline Hook 不兼容，会导致 inline_hook_check.mk 失败
-          # echo -e "CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-          echo -e "CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-          echo -e "CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+          
+          # ===== 关键：SUSFS 启用时，ReSukiSU 自动使用 Inline Hook，必须禁用 MANUAL_HOOK =====
+          if [[ "${{ inputs.susfs_enabled }}" != "true" ]]; then
+            echo -e "CONFIG_KSU_MANUAL_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+            echo -e "CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+            echo -e "CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+          fi
+          # =================================================================================
+          
           echo -e "CONFIG_KSU_MULTI_MANAGER_SUPPORT=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           echo -e "CONFIG_KALLSYMS=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           echo -e "CONFIG_KALLSYMS_ALL=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
@@ -383,6 +386,91 @@ jobs:
           path: ${{ github.workspace }}/susfs_rejects/
           if-no-files-found: ignore
           retention-days: 7
+                # ── 6.8 清理与 SuSFS Inline Hook 冲突的 Manual Hook 残留 ──
+      - name: 清理 Manual Hook 残留
+        if: inputs.ksu_enabled && inputs.susfs_enabled
+        working-directory: ${{ env.KERNEL_NAME }}
+        run: |
+          echo "[+] 扫描并清理与 SuSFS Inline Hook 冲突的 Manual Hook ..."
+
+          cleanup_ksu_hook() {
+            local file="$1"
+            if [ ! -f "$file" ]; then
+              return
+            fi
+            if ! grep -q "ksu_" "$file" 2>/dev/null; then
+              return
+            fi
+
+            echo "  发现 $file 存在 ksu_ hook，正在清理 ..."
+
+            python3 - "$file" << 'PYEOF'
+          import re
+          import sys
+
+          file = sys.argv[1]
+          with open(file, 'r') as f:
+              content = f.read()
+
+          # 策略1：删除 extern 声明块
+          content = re.sub(
+              r'#\s*ifdef\s+CONFIG_KSU\s*\n'
+              r'(?:\s*extern\s+bool\s+ksu_[^_]*_hook\s+__read_mostly;\s*\n'
+              r'|\s*extern\s+int\s+ksu_handle_[^(]*\([^)]*\);\s*\n'
+              r')+'
+              r'#\s*endif\s*\n?',
+              '', content
+          )
+
+          # 策略2：删除调用块
+          content = re.sub(
+              r'#\s*ifdef\s+CONFIG_KSU\s*\n'
+              r'\s*if\s*\(\s*unlikely\s*\(\s*ksu_[^(]*\)\s*\)\s*\n'
+              r'\s*ksu_handle_[^(]*\([^)]*\);\s*\n'
+              r'#\s*endif\s*\n?',
+              '', content
+          )
+
+          # 策略3：清理可能残留的单独行
+          lines = content.split('\n')
+          cleaned = []
+          for line in lines:
+              if 'ksu_input_hook' in line or 'ksu_handle_input_handle_event' in line:
+                  continue
+              if 'ksu_execveat_hook' in line or 'ksu_handle_execveat' in line:
+                  continue
+              if 'ksu_open_hook' in line or 'ksu_handle_open' in line:
+                  continue
+              if 'ksu_stat_hook' in line or 'ksu_handle_stat' in line:
+                  continue
+              if 'ksu_read_hook' in line or 'ksu_handle_read' in line:
+                  continue
+              if 'ksu_setuid_hook' in line or 'ksu_handle_setuid' in line:
+                  continue
+              if 'ksu_prctl_hook' in line or 'ksu_handle_prctl' in line:
+                  continue
+              cleaned.append(line)
+          content = '\n'.join(cleaned)
+
+          with open(file, 'w') as f:
+              f.write(content)
+          PYEOF
+
+            if grep -q "ksu_" "$file" 2>/dev/null; then
+              echo "::warning::$file 清理后仍有 ksu_ 残留，请手动检查"
+            else
+              echo "  $file 清理完成"
+            fi
+          }
+
+          cleanup_ksu_hook "drivers/input/input.c"
+          cleanup_ksu_hook "fs/exec.c"
+          cleanup_ksu_hook "fs/open.c"
+          cleanup_ksu_hook "fs/stat.c"
+          cleanup_ksu_hook "fs/read_write.c"
+          cleanup_ksu_hook "kernel/sys.c"
+
+          echo "[+] Manual Hook 清理完成"
       # ── 7. 集成 Droidspaces 支持 ──
       - name: 集成 Droidspaces 支持
         if: inputs.droidspaces_enabled
