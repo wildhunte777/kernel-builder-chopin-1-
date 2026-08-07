@@ -266,6 +266,7 @@ jobs:
 
           SUSFS_TAG="1.4.2-kernel-4.14"
           SUSFS_SRC="${{ github.workspace }}/susfs4ksu"
+          PATCH_FILE="$SUSFS_SRC/kernel_patches/50_add_susfs_in_kernel-4.14.patch"
 
           echo "[+] 下载 SUSFS ${SUSFS_TAG} ..."
           rm -rf "$SUSFS_SRC"
