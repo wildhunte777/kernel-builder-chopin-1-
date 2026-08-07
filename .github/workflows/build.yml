@@ -419,7 +419,6 @@ jobs:
                   content = f.read()
               
               if required_hook in content:
-                  # 已存在，只清理 incompatible 和 guard
                   content = remove_incompatible(content)
                   content = fix_guards(content)
                   with open(filepath, 'w') as f:
@@ -427,7 +426,6 @@ jobs:
                   print(f'  {filepath}: {required_hook} 已存在，已清理 incompatible')
                   return
               
-              # 缺失，需要插入
               print(f'  补全 {filepath} 的 {required_hook} ...')
               content = insert_fn(content)
               content = remove_incompatible(content)
@@ -439,6 +437,9 @@ jobs:
           # ===== fs/exec.c: ksu_handle_execveat =====
           def insert_execveat(content):
               pattern = r'(static\s+int\s+do_execveat_common\s*\([^)]*\)\s*\{)'
+              if not re.search(pattern, content):
+                  print("::error::无法在 fs/exec.c 中找到 do_execveat_common")
+                  sys.exit(1)
               hook = '''\\1
           #ifdef CONFIG_KSU
           \textern int ksu_handle_execveat(int fd, struct filename *filename, void *argv, void *envp, int flags);
@@ -446,14 +447,10 @@ jobs:
           \t\treturn 0;
           #endif
           '''
-              if not re.search(pattern, content):
-                  print("::error::无法在 fs/exec.c 中找到 do_execveat_common")
-                  sys.exit(1)
               return re.sub(pattern, hook, content, count=1)
           
           # ===== fs/open.c: ksu_handle_faccessat =====
           def insert_faccessat(content):
-              # 尝试多种可能的函数名
               for func_name in ['do_faccessat', 'sys_faccessat', 'SYSCALL_DEFINE3(faccessat,']:
                   pattern = rf'({re.escape(func_name)}[^{{]*\{{)'
                   if re.search(pattern, content):
@@ -485,30 +482,28 @@ jobs:
               sys.exit(1)
           
           # ===== fs/read_write.c: ksu_handle_sys_read =====
+          # 4.14 必须在 SYSCALL_DEFINE3(read, ...) 或 ksys_read 中插入，vfs_read 没有 fd 参数
           def insert_sys_read(content):
-              # 4.14 应该在 SYSCALL_DEFINE3(read, ...) 或 ksys_read 中插入
-              # 优先尝试 SYSCALL_DEFINE3(read,
+              # 尝试1: 在 SYSCALL_DEFINE3(read, ...) 的 { 后插入
               pattern = r'(SYSCALL_DEFINE3\s*\(\s*read\s*,\s*unsigned\s+int\s*,\s*fd\s*,[^)]*\)\s*\{)'
               if re.search(pattern, content):
                   hook = '''\\1
           \t#ifdef CONFIG_KSU
-          \textern int ksu_handle_sys_read(unsigned int fd, char __user **buf, size_t *count);
+          \textern int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr, size_t *count_ptr);
           \tif (ksu_handle_sys_read(fd, &buf, &count)) {
-          \t\tfdput(f);
           \t\treturn -EFAULT;
           \t}
           \t#endif
           '''
                   return re.sub(pattern, hook, content, count=1)
               
-              # 尝试 ksys_read
+              # 尝试2: 在 ksys_read 的 { 后插入
               pattern = r'(ssize_t\s+ksys_read\s*\(\s*unsigned\s+int\s+fd[^)]*\)\s*\{)'
               if re.search(pattern, content):
                   hook = '''\\1
           \t#ifdef CONFIG_KSU
-          \textern int ksu_handle_sys_read(unsigned int fd, char __user **buf, size_t *count);
+          \textern int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr, size_t *count_ptr);
           \tif (ksu_handle_sys_read(fd, &buf, &count)) {
-          \t\tfdput(f);
           \t\treturn -EFAULT;
           \t}
           \t#endif
@@ -548,12 +543,6 @@ jobs:
               print("::error::无法在 drivers/input/input.c 中找到 input_event")
               sys.exit(1)
           
-          # ===== kernel/sys.c: 只清理，不插入（由步骤 6.9 处理）=====
-          def clean_sys_c(content):
-              content = remove_incompatible(content)
-              content = fix_guards(content)
-              return content
-          
           # 执行修补
           patch_file('fs/exec.c', 'ksu_handle_execveat', insert_execveat)
           patch_file('fs/open.c', 'ksu_handle_faccessat', insert_faccessat)
@@ -562,13 +551,15 @@ jobs:
           patch_file('kernel/reboot.c', 'ksu_handle_sys_reboot', insert_reboot)
           patch_file('drivers/input/input.c', 'ksu_handle_input_handle_event', insert_input)
           
+          # kernel/sys.c 只清理，不验证（由步骤 6.9 处理）
           if os.path.exists('kernel/sys.c'):
               with open('kernel/sys.c', 'r') as f:
                   content = f.read()
-              content = clean_sys_c(content)
+              content = remove_incompatible(content)
+              content = fix_guards(content)
               with open('kernel/sys.c', 'w') as f:
                   f.write(content)
-              print('  kernel/sys.c: 已清理')
+              print('  kernel/sys.c: 已清理 incompatible 和 guard（setresuid 由后续步骤处理）')
           
           print('[+] 处理完成')
           PYEOF
@@ -577,7 +568,7 @@ jobs:
           
           echo "[+] 验证 required hooks ..."
           all_ok=true
-          for file in fs/exec.c fs/open.c fs/stat.c fs/read_write.c kernel/reboot.c kernel/sys.c drivers/input/input.c; do
+          for file in fs/exec.c fs/open.c fs/stat.c fs/read_write.c kernel/reboot.c drivers/input/input.c; do
             [ -f "$file" ] || continue
             case $file in
               fs/exec.c) expected="ksu_handle_execveat" ;;
@@ -585,7 +576,6 @@ jobs:
               fs/stat.c) expected="ksu_handle_stat" ;;
               fs/read_write.c) expected="ksu_handle_sys_read" ;;
               kernel/reboot.c) expected="ksu_handle_sys_reboot" ;;
-              kernel/sys.c) expected="ksu_handle_setresuid" ;;
               drivers/input/input.c) expected="ksu_handle_input_handle_event" ;;
             esac
             if grep -q "$expected" "$file"; then
@@ -595,6 +585,9 @@ jobs:
               all_ok=false
             fi
           done
+          
+          # kernel/sys.c 由步骤 6.9 处理，这里不验证
+          echo "  ⏳ kernel/sys.c: ksu_handle_setresuid 将由步骤 6.9 处理"
           
           if [ "$all_ok" = false ]; then
             echo "::error::部分 required hook 缺失，编译将失败"
