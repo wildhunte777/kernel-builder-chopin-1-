@@ -471,72 +471,51 @@ jobs:
           cleanup_ksu_hook "kernel/sys.c"
 
           echo "[+] Manual Hook 清理完成"
-     # ── 6.9 修补 kernel/sys.c 缺失的 ksu_handle_setresuid hook ──
+           # ── 6.9 修补 kernel/sys.c 缺失的 ksu_handle_setresuid hook ──
       - name: 修补 kernel/sys.c setresuid hook
         if: inputs.ksu_enabled && inputs.susfs_enabled
         working-directory: ${{ env.KERNEL_NAME }}
         run: |
           echo "[+] 检查并修补 kernel/sys.c 中的 ksu_handle_setresuid hook ..."
 
-          if ! grep -q "ksu_handle_setresuid" kernel/sys.c; then
-            echo "  kernel/sys.c 缺少 ksu_handle_setresuid，正在修补 ..."
-
-            python3 << 'PYEOF'
-          with open('kernel/sys.c', 'r') as f:
-              lines = f.readlines()
-
-          new_lines = []
-          i = 0
-          patched = False
-
-          while i < len(lines):
-              line = lines[i]
-              new_lines.append(line)
-
-              if 'SYSCALL_DEFINE3(setresuid,' in line and not patched:
-                  j = i + 1
-                  while j < len(lines) and '{' not in lines[j]:
-                      new_lines.append(lines[j])
-                      j += 1
-
-                  if j < len(lines) and '{' in lines[j]:
-                      new_lines.append(lines[j])
-                      indent = '    '
-                      hook_code = [
-                          indent + 'struct user_namespace *ns = current_user_ns();,
-                          indent + 'kuid_t kruid, keuid, ksuid;,
-                          indent + 'int retval;,
-                          indent + '#ifdef CONFIG_KSU,
-                          indent + 'extern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);,
-                          indent + 'if (ksu_handle_setresuid(ruid, euid, suid)) {,
-                          indent + '    pr_info("Something wrong with ksu_handle_setresuid()\n");,
-                          indent + '},
-                          indent + '#endif,
-                      ]
-                      new_lines.extend(hook_code)
-                      i = j
-                      patched = True
-
-              i += 1
-
-          if not patched:
-              print("::error::无法在 kernel/sys.c 中找到 SYSCALL_DEFINE3(setresuid)")
-              exit(1)
-
-          with open('kernel/sys.c', 'w') as f:
-              f.writelines(new_lines)
-
-          print("  kernel/sys.c 修补成功")
-          PYEOF
-
-            if grep -q "ksu_handle_setresuid" kernel/sys.c; then
-              echo "  kernel/sys.c 验证通过"
-            else
-              echo "::error::kernel/sys.c 修补失败"
-              exit 1
-            fi
-          else
+          if grep -q "ksu_handle_setresuid" kernel/sys.c; then
             echo "  kernel/sys.c 已存在 ksu_handle_setresuid，跳过"
+            exit 0
+          fi
+
+          echo "  kernel/sys.c 缺少 ksu_handle_setresuid，正在修补 ..."
+
+          # 找到 SYSCALL_DEFINE3(setresuid,...) 函数，在其 { 后面插入 hook
+          # 先找到包含 SYSCALL_DEFINE3(setresuid 的行号
+          LINE=$(grep -n "SYSCALL_DEFINE3(setresuid," kernel/sys.c | head -1 | cut -d: -f1)
+          if [ -z "$LINE" ]; then
+            echo "::error::无法在 kernel/sys.c 中找到 SYSCALL_DEFINE3(setresuid)"
+            exit 1
+          fi
+
+          # 从该行开始往下找第一个 {
+          START=$(sed -n "${LINE},/^SYSCALL_DEFINE3/{
+            /{/=
+          }" kernel/sys.c | head -1)
+          if [ -z "$START" ]; then
+            echo "::error::无法找到 setresuid 函数的 {"
+            exit 1
+          fi
+
+          # 在 { 后面插入 hook 代码
+          sed -i "${START} a\\
+          #ifdef CONFIG_KSU\\
+          extern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);\\
+          if (ksu_handle_setresuid(ruid, euid, suid)) {\\
+                  pr_info(\"Something wrong with ksu_handle_setresuid()\\\\n\");\\
+          }\\
+          #endif" kernel/sys.c
+
+          if grep -q "ksu_handle_setresuid" kernel/sys.c; then
+            echo "  kernel/sys.c 验证通过"
+          else
+            echo "::error::kernel/sys.c 修补失败"
+            exit 1
           fi
       # ── 7. 集成 Droidspaces 支持 ──
       - name: 集成 Droidspaces 支持
