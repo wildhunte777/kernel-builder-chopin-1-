@@ -262,15 +262,15 @@ jobs:
 
           cat arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           
-                # ── 6.1 Patch ReSukiSU dispatch.c 包含 compat header ──
+        # ── 6.1 Patch ReSukiSU dispatch.c 包含 compat header ──
       - name: Patch ReSukiSU dispatch.c
         if: inputs.ksu_enabled && inputs.susfs_enabled
         working-directory: ${{ env.KERNEL_NAME }}
         run: |
           DISPATCH="drivers/kernelsu/supercall/dispatch.c"
           
-          # 1) 添加 compat header
-            if [ -f "$DISPATCH" ] && ! grep -q "susfs_ksu_compat.h" "$DISPATCH"; then
+          # 1) 添加 compat header（匹配 susfs.h 或 susfs_def.h）
+          if [ -f "$DISPATCH" ] && ! grep -q "susfs_ksu_compat.h" "$DISPATCH"; then
             if grep -q '#include <linux/susfs.h>' "$DISPATCH"; then
               sed -i '/#include <linux\/susfs.h>/a #include <linux/susfs_ksu_compat.h>' "$DISPATCH"
             else
@@ -279,14 +279,13 @@ jobs:
             echo "[+] 已添加 susfs_ksu_compat.h 到 dispatch.c"
           fi
           
-                    # 2) 修复 ksu_handle_susfs_cmd 中所有 susfs_xxx(arg) -> susfs_xxx(*arg)
+          # 2) 修复 ksu_handle_susfs_cmd：susfs_xxx(arg) → susfs_xxx(*arg)
           python3 << 'PYEOF'
           import re
 
           with open('drivers/kernelsu/supercall/dispatch.c', 'r') as f:
               content = f.read()
 
-          # 宽松匹配：从函数签名开始到 #endif 结束
           pattern = r'(int ksu_handle_susfs_cmd\(unsigned int cmd, void __user \*\*arg\)\s*\{)(.*?)(\n\}\s*\n#endif)'
 
           def fix_body(m):
@@ -305,12 +304,24 @@ jobs:
           new_content = re.sub(pattern, fix_body, content, flags=re.DOTALL)
           
           if new_content == content:
-              print("::warning::dispatch.c 正则未匹配到 ksu_handle_susfs_cmd，请检查源码")
+              print("::warning::dispatch.c 正则未匹配到 ksu_handle_susfs_cmd")
           else:
               with open('drivers/kernelsu/supercall/dispatch.c', 'w') as f:
                   f.write(new_content)
               print("[+] dispatch.c 已修复：arg -> *arg")
           PYEOF
+          
+          SUCOMPAT="drivers/kernelsu/feature/sucompat.c"
+          if [ -f "$SUCOMPAT" ] && ! grep -q "susfs_ksu_compat.h" "$SUCOMPAT"; then
+            sed -i '/#include <linux\/susfs.h>/a #include <linux/susfs_ksu_compat.h>' "$SUCOMPAT"
+            echo "[+] 已添加 susfs_ksu_compat.h 到 sucompat.c"
+          fi
+          
+          UMOUNT="drivers/kernelsu/feature/kernel_umount.c"
+          if [ -f "$UMOUNT" ] && ! grep -q "susfs_ksu_compat.h" "$UMOUNT"; then
+            sed -i '/#include <linux\/susfs.h>/a #include <linux/susfs_ksu_compat.h>' "$UMOUNT"
+            echo "[+] 已添加 susfs_ksu_compat.h 到 kernel_umount.c"
+          fi
             
        # ── 6.5 集成 SUSFS (kernel-4.14 分支最新 = v1.5.5) ──
       - name: 集成 SUSFS (4.14 最新分支)
@@ -340,34 +351,99 @@ jobs:
             cp -v "$SUSFS_SRC/kernel_patches/include/linux/susfs_def.h" include/linux/
           fi
 
-                    # 1.5) 创建 ReSukiSU 兼容层头文件并链接到 susfs_def.h
+          # 1.5) 创建完整的 ReSukiSU v2.2.0 → SUSFS v1.5.5 转接层
           echo "[+] 创建 susfs_ksu_compat.h 兼容层 ..."
 
           cat > include/linux/susfs_ksu_compat.h << 'EOF'
           #ifndef KSU_SUSFS_COMPAT_H
           #define KSU_SUSFS_COMPAT_H
           /*
-           * Bridge header for ReSukiSU / SukiSU-Ultra builtin branch.
-           * ReSukiSU expects SUSFS v2.2.0 API but kernel-4.14 only has v1.5.5.
+           * Complete bridge header: ReSukiSU (SUSFS v2.2.0 API)
+           * → kernel-4.14 SUSFS v1.5.5
            */
           #include <linux/uaccess.h>
           #include <linux/workqueue.h>
 
-                   /* 前向声明（避免循环 include） */
+          /* ===== v2.2.0 Magic & CMD defines missing in v1.5.5 ===== */
+          #define SUSFS_MAGIC                                0x9B0E63
+          #define CMD_SUSFS_ADD_SUS_PATH_LOOP                0x55551
+          #define CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS   0x55561
+          #define CMD_SUSFS_ADD_SUS_MAP                      0x55562
+          #define CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING          0x55563
+
+          /* ===== v1.5.5 已有的 CMD（确保一致性）===== */
+          #ifndef CMD_SUSFS_ADD_SUS_PATH
+          #define CMD_SUSFS_ADD_SUS_PATH                     0x55550
+          #endif
+          #ifndef CMD_SUSFS_ADD_SUS_MOUNT
+          #define CMD_SUSFS_ADD_SUS_MOUNT                    0x55560
+          #endif
+          #ifndef CMD_SUSFS_ADD_SUS_KSTAT
+          #define CMD_SUSFS_ADD_SUS_KSTAT                    0x55570
+          #endif
+          #ifndef CMD_SUSFS_UPDATE_SUS_KSTAT
+          #define CMD_SUSFS_UPDATE_SUS_KSTAT                 0x55571
+          #endif
+          #ifndef CMD_SUSFS_ADD_TRY_UMOUNT
+          #define CMD_SUSFS_ADD_TRY_UMOUNT                   0x55580
+          #endif
+          #ifndef CMD_SUSFS_SET_UNAME
+          #define CMD_SUSFS_SET_UNAME                        0x55590
+          #endif
+          #ifndef CMD_SUSFS_ENABLE_LOG
+          #define CMD_SUSFS_ENABLE_LOG                       0x555a0
+          #endif
+          #ifndef CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG
+          #define CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG        0x555b0
+          #endif
+          #ifndef CMD_SUSFS_ADD_OPEN_REDIRECT
+          #define CMD_SUSFS_ADD_OPEN_REDIRECT                0x555c0
+          #endif
+          #ifndef CMD_SUSFS_SHOW_VERSION
+          #define CMD_SUSFS_SHOW_VERSION                     0x555e1
+          #endif
+          #ifndef CMD_SUSFS_SHOW_ENABLED_FEATURES
+          #define CMD_SUSFS_SHOW_ENABLED_FEATURES            0x555e2
+          #endif
+          #ifndef CMD_SUSFS_SHOW_VARIANT
+          #define CMD_SUSFS_SHOW_VARIANT                     0x555e3
+          #endif
+
+          /* ===== 前向声明（避免循环 include）===== */
           void susfs_set_log(bool enabled);
 
-          #define SUSFS_MAGIC 0x9B0E63
-
-          /* ===== Missing CMD defines from v2.2.0 ===== */
-          #define CMD_SUSFS_ADD_SUS_PATH_LOOP            0x55551
-          #define CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS 0x55561
-          #define CMD_SUSFS_ADD_SUS_MAP                  0x55562
-          #define CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING      0x55563
-
-          /* ===== ReSukiSU expects susfs_extra_works as work_struct ===== */
+          /* ===== v2.2.0 新增全局符号 ===== */
           extern struct work_struct susfs_extra_works;
 
-          /* ===== Wrapper: ReSukiSU calls susfs_enable_log(void *), v1.5.5 has susfs_set_log(bool) ===== */
+          /* ===== v2.2.0 新函数 → v1.5.5 stub ===== */
+          static inline int susfs_add_sus_path_loop(void __user *p)
+          { (void)p; return -ENOTSUPP; }
+
+          static inline int susfs_set_hide_sus_mnts_for_non_su_procs(void __user *p)
+          { (void)p; return -ENOTSUPP; }
+
+          static inline int susfs_add_sus_map(void __user *p)
+          { (void)p; return -ENOTSUPP; }
+
+          static inline int susfs_set_avc_log_spoofing(void __user *p)
+          { (void)p; return -ENOTSUPP; }
+
+          static inline int susfs_get_enabled_features(void __user *p)
+          { (void)p; return -ENOTSUPP; }
+
+          static inline int susfs_show_variant(void __user *p)
+          { (void)p; return -ENOTSUPP; }
+
+          static inline int susfs_show_version(void __user *p)
+          { (void)p; return -ENOTSUPP; }
+
+          static inline void susfs_start_sdcard_monitor_fn(void) {}
+
+          /* ===== 内核补丁插入的函数（task_mmu.c 等）===== */
+          static inline int susfs_sus_map(void *m, void *vma, int is_pid)
+          { (void)m; (void)vma; (void)is_pid; return 0; }
+
+          /* ===== 函数名映射：v2.2.0 → v1.5.5 ===== */
           static inline int susfs_enable_log(void __user *user_info)
           {
           #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
@@ -379,31 +455,19 @@ jobs:
               return 0;
           }
 
-          /* ===== No-op stubs for v2.2.0 APIs NOT in v1.5.5 ===== */
-          static inline int susfs_add_sus_path_loop(void __user *p) { (void)p; return -ENOTSUPP; }
-          static inline int susfs_set_hide_sus_mnts_for_non_su_procs(void __user *p) { (void)p; return -ENOTSUPP; }
-          static inline int susfs_add_sus_map(void __user *p) { (void)p; return -ENOTSUPP; }
-          static inline int susfs_set_avc_log_spoofing(void __user *p) { (void)p; return -ENOTSUPP; }
-          static inline int susfs_get_enabled_features(void __user *p) { (void)p; return -ENOTSUPP; }
-          static inline int susfs_show_variant(void __user *p) { (void)p; return -ENOTSUPP; }
-          static inline int susfs_show_version(void __user *p) { (void)p; return -ENOTSUPP; }
-          static inline void susfs_start_sdcard_monitor_fn(void) {}
+          /* ===== ReSukiSU 特定 stub ===== */
+          static inline bool susfs_is_current_proc_umounted(void)
+          { return false; }
 
-          /* ===== ReSukiSU specific stubs ===== */
-          static inline bool susfs_is_current_proc_umounted(void) { return false; }
           static inline void susfs_set_current_proc_umounted(void) {}
 
           #endif /* KSU_SUSFS_COMPAT_H */
           EOF
 
-          # 去除 YAML 缩进引入的前导 10 个空格
           sed -i 's/^[[:space:]]*//' include/linux/susfs_ksu_compat.h
-          echo "[+] 验证 susfs_ksu_compat.h 前 5 行:"
-          head -5 include/linux/susfs_ksu_compat.h | cat -A
 
           echo "[+] 兼容层创建完成"
-
-          echo "[+] 链接 susfs_ksu_compat.h 到 susfs_def.h ..."
+                    echo "[+] 链接 susfs_ksu_compat.h 到 susfs_def.h ..."
           python3 << 'PYEOF'
           with open('include/linux/susfs_def.h', 'r') as f:
               content = f.read()
@@ -419,6 +483,13 @@ jobs:
           else:
               print('[+] susfs_def.h 已包含 compat header')
           PYEOF
+                             # 1.6) 只保留 work_struct 定义（compat header 已提供所有 stub）
+          echo "[+] 追加 work_struct 到 fs/susfs.c ..."
+          cat >> fs/susfs.c << 'EOF'
+
+          /* ===== ReSukiSU compat: work_struct ===== */
+          struct work_struct susfs_extra_works;
+          EOF
 
           # 2) 应用内核侧补丁
           echo "[+] 应用内核侧补丁 (50_add_susfs_in_kernel-4.14.patch) ..."
