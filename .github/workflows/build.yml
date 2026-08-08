@@ -389,7 +389,9 @@ jobs:
           EOF
 
           # 去除 YAML 缩进引入的前导 10 个空格
-          sed -i 's/^          //' include/linux/susfs_ksu_compat.h
+          sed -i 's/^[[:space:]]*//' include/linux/susfs_ksu_compat.h
+          echo "[+] 验证 susfs_ksu_compat.h 前 5 行:"
+          head -5 include/linux/susfs_ksu_compat.h | cat -A
 
           echo "[+] 兼容层创建完成"
           # 2) 应用内核侧补丁
