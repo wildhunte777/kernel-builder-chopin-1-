@@ -473,6 +473,25 @@ jobs:
             } >> "$DEFCONFIG"
             echo "[+] SUSFS 配置写入完成"
           fi
+            # ── 6.6 调试：打印关键文件内容后退出 ──
+      - name: 调试打印关键文件并退出
+        if: inputs.ksu_enabled && inputs.susfs_enabled
+        working-directory: ${{ env.KERNEL_NAME }}
+        run: |
+          echo "========== dispatch.c 前 30 行 =========="
+          head -30 drivers/kernelsu/supercall/dispatch.c
+          
+          echo ""
+          echo "========== susfs_ksu_compat.h 完整内容 =========="
+          cat include/linux/susfs_ksu_compat.h
+          
+          echo ""
+          echo "========== susfs_def.h 最后 10 行 =========="
+          tail -10 include/linux/susfs_def.h
+          
+          echo ""
+          echo "[+] 调试信息打印完成，退出构建"
+          exit 0
       # ── 6.8 清理 Manual Hook 残留并补全 Required Hooks ──
       - name: 清理 Manual Hook 并补全 Required Hooks
         if: inputs.ksu_enabled && inputs.susfs_enabled
