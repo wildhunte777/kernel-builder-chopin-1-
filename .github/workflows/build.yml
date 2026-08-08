@@ -350,9 +350,11 @@ jobs:
            * Bridge header for ReSukiSU / SukiSU-Ultra builtin branch.
            * ReSukiSU expects SUSFS v2.2.0 API but kernel-4.14 only has v1.5.5.
            */
-          #include <linux/susfs.h>
           #include <linux/uaccess.h>
           #include <linux/workqueue.h>
+
+          /* 前向声明（避免循环 include） */
+          void susfs_set_log(bool enabled);
 
           /* ===== Missing CMD defines from v2.2.0 ===== */
           #define CMD_SUSFS_ADD_SUS_PATH_LOOP            0x55551
