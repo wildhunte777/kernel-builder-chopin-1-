@@ -341,7 +341,7 @@ jobs:
             cp -v "$SUSFS_SRC/kernel_patches/include/linux/susfs_def.h" include/linux/
           fi
 
-          # 1.5) 创建 ReSukiSU 兼容层头文件并链接到 susfs_def.h
+                    # 1.5) 创建 ReSukiSU 兼容层头文件并链接到 susfs_def.h
           echo "[+] 创建 susfs_ksu_compat.h 兼容层 ..."
 
           cat > include/linux/susfs_ksu_compat.h << 'EOF'
@@ -352,20 +352,39 @@ jobs:
            * ReSukiSU expects SUSFS v2.2.0 API but kernel-4.14 only has v1.5.5.
            */
           #include <linux/susfs.h>
+          #include <linux/uaccess.h>
           #include <linux/workqueue.h>
+
+          /* ===== Missing CMD defines from v2.2.0 ===== */
+          #define CMD_SUSFS_ADD_SUS_PATH_LOOP            0x55551
+          #define CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS 0x55561
+          #define CMD_SUSFS_ADD_SUS_MAP                  0x55562
+          #define CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING      0x55563
 
           /* ===== ReSukiSU expects susfs_extra_works as work_struct ===== */
           extern struct work_struct susfs_extra_works;
 
+          /* ===== Wrapper: ReSukiSU calls susfs_enable_log(void *), v1.5.5 has susfs_set_log(bool) ===== */
+          static inline int susfs_enable_log(void __user *user_info)
+          {
+          #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+              bool enabled;
+              if (copy_from_user(&enabled, user_info, sizeof(enabled)))
+                  return -EFAULT;
+              susfs_set_log(enabled);
+          #endif
+              return 0;
+          }
+
           /* ===== No-op stubs for v2.2.0 APIs NOT in v1.5.5 ===== */
-          #define susfs_add_sus_path_loop(p) do { (void)(p); } while(0)
-          #define susfs_set_hide_sus_mnts_for_non_su_procs(p) do { (void)(p); } while(0)
-          #define susfs_add_sus_map(p) do { (void)(p); } while(0)
-          #define susfs_set_avc_log_spoofing(p) do { (void)(p); } while(0)
-          #define susfs_get_enabled_features(p) do { (void)(p); } while(0)
-          #define susfs_show_variant(p) do { (void)(p); } while(0)
-          #define susfs_show_version(p) do { (void)(p); } while(0)
-          #define susfs_start_sdcard_monitor_fn() do {} while(0)
+          static inline int susfs_add_sus_path_loop(void __user *p) { (void)p; return -ENOTSUPP; }
+          static inline int susfs_set_hide_sus_mnts_for_non_su_procs(void __user *p) { (void)p; return -ENOTSUPP; }
+          static inline int susfs_add_sus_map(void __user *p) { (void)p; return -ENOTSUPP; }
+          static inline int susfs_set_avc_log_spoofing(void __user *p) { (void)p; return -ENOTSUPP; }
+          static inline int susfs_get_enabled_features(void __user *p) { (void)p; return -ENOTSUPP; }
+          static inline int susfs_show_variant(void __user *p) { (void)p; return -ENOTSUPP; }
+          static inline int susfs_show_version(void __user *p) { (void)p; return -ENOTSUPP; }
+          static inline void susfs_start_sdcard_monitor_fn(void) {}
 
           /* ===== ReSukiSU specific stubs ===== */
           static inline bool susfs_is_current_proc_umounted(void) { return false; }
@@ -378,47 +397,6 @@ jobs:
           sed -i 's/^          //' include/linux/susfs_ksu_compat.h
 
           echo "[+] 兼容层创建完成"
-
-          echo "[+] 链接 susfs_ksu_compat.h 到 susfs_def.h ..."
-          sed -i '/#endif \/\/ #ifndef KSU_SUSFS_DEF_H/i #include <linux/susfs_ksu_compat.h>' include/linux/susfs_def.h
-          echo "[+] susfs_def.h 已链接 compat header"
-
-                   # 1.6) 追加 ReSukiSU stub 实现到 susfs.c
-          echo "[+] 追加 stub 实现到 fs/susfs.c ..."
-          cat >> fs/susfs.c << 'EOF'
-
-          /* ===== ReSukiSU compat: work_struct and stubs ===== */
-          struct work_struct susfs_extra_works;
-
-          #undef susfs_add_sus_path_loop
-          int susfs_add_sus_path_loop(void __user *user_info) {
-              (void)user_info;
-              return -ENOTSUPP;
-          }
-
-          #undef susfs_set_hide_sus_mnts_for_non_su_procs
-          int susfs_set_hide_sus_mnts_for_non_su_procs(void __user *user_info) {
-              (void)user_info;
-              return -ENOTSUPP;
-          }
-
-          #undef susfs_add_sus_map
-          int susfs_add_sus_map(void __user *user_info) {
-              (void)user_info;
-              return -ENOTSUPP;
-          }
-
-          #undef susfs_set_avc_log_spoofing
-          int susfs_set_avc_log_spoofing(void __user *user_info) {
-              (void)user_info;
-              return -ENOTSUPP;
-          }
-
-          #undef susfs_start_sdcard_monitor_fn
-          void susfs_start_sdcard_monitor_fn(void) {
-          }
-          EOF
-
           # 2) 应用内核侧补丁
           echo "[+] 应用内核侧补丁 (50_add_susfs_in_kernel-4.14.patch) ..."
           REJ_DIR="${{ github.workspace }}/susfs_rejects"
