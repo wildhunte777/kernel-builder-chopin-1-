@@ -275,30 +275,25 @@ jobs:
             echo "[+] 已添加 susfs_ksu_compat.h 到 dispatch.c"
           fi
           
-          # 2) 修复 ksu_handle_susfs_cmd 中所有 susfs_xxx(arg) -> susfs_xxx(*arg)
-          #    并处理 susfs_enable_log -> susfs_set_log 的映射
+                    # 2) 修复 ksu_handle_susfs_cmd 中所有 susfs_xxx(arg) -> susfs_xxx(*arg)
           python3 << 'PYEOF'
           import re
 
           with open('drivers/kernelsu/supercall/dispatch.c', 'r') as f:
               content = f.read()
 
-          # 定位 ksu_handle_susfs_cmd 函数体
-          pattern = r'(int ksu_handle_susfs_cmd\\(unsigned int cmd, void __user \\*\\*arg\\)\\s*\\{)(.*?)(\\n\\}\\s*\\n#endif\\s*\\n#ifdef CONFIG_KSU_TOOLKIT_SUPPORT)'
+          # 宽松匹配：从函数签名开始到 #endif 结束
+          pattern = r'(int ksu_handle_susfs_cmd\(unsigned int cmd, void __user \*\*arg\)\s*\{)(.*?)(\n\}\s*\n#endif)'
 
           def fix_body(m):
               header, body, footer = m.group(1), m.group(2), m.group(3)
               
-              # 把所有 susfs_xxx(arg); 改成 susfs_xxx(*arg);
-              # 排除 susfs_enable_log，它需要特殊处理
               body = re.sub(
-                  r'\\b(susfs_add_sus_path|susfs_add_sus_path_loop|susfs_set_hide_sus_mnts_for_non_su_procs|susfs_add_sus_kstat|susfs_update_sus_kstat|susfs_set_uname|susfs_set_cmdline_or_bootconfig|susfs_add_open_redirect|susfs_add_sus_map|susfs_set_avc_log_spoofing|susfs_get_enabled_features|susfs_show_variant|susfs_show_version)\\(arg\\);',
-                  r'\\1(*arg);',
+                  r'\b(susfs_add_sus_path|susfs_add_sus_path_loop|susfs_set_hide_sus_mnts_for_non_su_procs|susfs_add_sus_kstat|susfs_update_sus_kstat|susfs_set_uname|susfs_set_cmdline_or_bootconfig|susfs_add_open_redirect|susfs_add_sus_map|susfs_set_avc_log_spoofing|susfs_get_enabled_features|susfs_show_variant|susfs_show_version)\(arg\);',
+                  r'\1(*arg);',
                   body
               )
               
-              # susfs_enable_log 特殊处理：v1.5.5 只有 susfs_set_log(bool)
-              # 我们在 compat header 里提供 wrapper，这里只需改传参
               body = body.replace('susfs_enable_log(arg);', 'susfs_enable_log(*arg);')
               
               return header + body + footer
@@ -394,7 +389,7 @@ jobs:
           EOF
 
           # 去除 YAML 缩进引入的前导 10 个空格
-          sed -i 's/^          //' include/linux/susfs_ksu_compat.h
+                    sed -i 's/^          //' include/linux/susfs_ksu_compat.h
 
           echo "[+] 兼容层创建完成"
           # 2) 应用内核侧补丁
