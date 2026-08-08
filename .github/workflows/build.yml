@@ -262,33 +262,7 @@ jobs:
 
           cat arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
 
-            # ── 6.5 集成 SUSFS (kernel-4.14 分支最新 = v1.5.5) ──
-      - name: 集成 SUSFS (4.14 最新分支)
-        if: inputs.susfs_enabled && inputs.ksu_enabled
-        working-directory: ${{ env.KERNEL_NAME }}
-        run: |
-          set -euo pipefail
-
-          SUSFS_SRC="${{ github.workspace }}/susfs4ksu"
-          PATCH_FILE="$SUSFS_SRC/kernel_patches/50_add_susfs_in_kernel-4.14.patch"
-
-          echo "[+] 下载 SUSFS kernel-4.14 分支最新 (预期 v1.5.5) ..."
-          rm -rf "$SUSFS_SRC"
-          git clone --depth=1 --branch "kernel-4.14" \
-            https://gitlab.com/simonpunk/susfs4ksu.git "$SUSFS_SRC"
-
-          # 验证实际版本
-          echo "[+] 验证 SUSFS 版本 ..."
-          grep -r "SUSFS_VERSION" "$SUSFS_SRC/kernel_patches/include/linux/susfs.h" 2>/dev/null || true
-          grep -r "version" "$SUSFS_SRC/kernel_patches/fs/susfs.c" | head -3 || true
-
-          # 1) 复制核心文件
-          echo "[+] 复制 SUSFS 核心文件 ..."
-          cp -v "$SUSFS_SRC/kernel_patches/fs/susfs.c" fs/
-          cp -v "$SUSFS_SRC/kernel_patches/include/linux/susfs.h" include/linux/
-          if [ -f "$SUSFS_SRC/kernel_patches/include/linux/susfs_def.h" ]; then
-            cp -v "$SUSFS_SRC/kernel_patches/include/linux/susfs_def.h" include/linux/
-          fi
+            
                 # ── 6.5 集成 SUSFS (kernel-4.14 分支最新 = v1.5.5) ──
       - name: 集成 SUSFS (4.14 最新分支)
         if: inputs.susfs_enabled && inputs.ksu_enabled
