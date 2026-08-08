@@ -315,18 +315,20 @@ jobs:
                     # 1.5) 创建 ReSukiSU 兼容层头文件并链接到 susfs_def.h
           echo "[+] 创建 susfs_ksu_compat.h 兼容层 ..."
 
-          cat > include/linux/susfs_ksu_compat.h << 'EOF'
+                    cat > include/linux/susfs_ksu_compat.h << 'EOF'
           #ifndef KSU_SUSFS_COMPAT_H
           #define KSU_SUSFS_COMPAT_H
           /*
            * Bridge header for ReSukiSU / SukiSU-Ultra builtin branch.
            * ReSukiSU expects SUSFS v2.2.0 API but kernel-4.14 only has v1.5.5.
-           * This header provides no-op stubs for missing APIs.
            */
           #include <linux/susfs.h>
+          #include <linux/workqueue.h>
+
+          /* ===== ReSukiSU expects susfs_extra_works as work_struct ===== */
+          extern struct work_struct susfs_extra_works;
 
           /* ===== No-op stubs for v2.2.0 APIs NOT in v1.5.5 ===== */
-          /* These functions do not exist in 1.5.5, so we provide stubs. */
           #define susfs_add_sus_path_loop(p) do { (void)(p); } while(0)
           #define susfs_set_hide_sus_mnts_for_non_su_procs(p) do { (void)(p); } while(0)
           #define susfs_add_sus_map(p) do { (void)(p); } while(0)
@@ -339,10 +341,12 @@ jobs:
           /* ===== ReSukiSU specific stubs ===== */
           static inline bool susfs_is_current_proc_umounted(void) { return false; }
           static inline void susfs_set_current_proc_umounted(void) {}
-          static inline void susfs_extra_works(void) {}
 
           #endif /* KSU_SUSFS_COMPAT_H */
           EOF
+
+          # 去除 YAML 缩进引入的前导 10 个空格
+          sed -i 's/^          //' include/linux/susfs_ksu_compat.h
 
           # 去除 YAML 缩进引入的前导 10 个空格
           sed -i 's/^          //' include/linux/susfs_ksu_compat.h
