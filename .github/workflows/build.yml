@@ -270,8 +270,12 @@ jobs:
           DISPATCH="drivers/kernelsu/supercall/dispatch.c"
           
           # 1) 添加 compat header
-          if [ -f "$DISPATCH" ] && ! grep -q "susfs_ksu_compat.h" "$DISPATCH"; then
-            sed -i '/#include <linux\/susfs.h>/a #include <linux/susfs_ksu_compat.h>' "$DISPATCH"
+            if [ -f "$DISPATCH" ] && ! grep -q "susfs_ksu_compat.h" "$DISPATCH"; then
+            if grep -q '#include <linux/susfs.h>' "$DISPATCH"; then
+              sed -i '/#include <linux\/susfs.h>/a #include <linux/susfs_ksu_compat.h>' "$DISPATCH"
+            else
+              sed -i '/#include <linux\/susfs_def.h>/a #include <linux/susfs_ksu_compat.h>' "$DISPATCH"
+            fi
             echo "[+] 已添加 susfs_ksu_compat.h 到 dispatch.c"
           fi
           
@@ -394,6 +398,24 @@ jobs:
           head -5 include/linux/susfs_ksu_compat.h | cat -A
 
           echo "[+] 兼容层创建完成"
+
+          echo "[+] 链接 susfs_ksu_compat.h 到 susfs_def.h ..."
+          python3 << 'PYEOF'
+          with open('include/linux/susfs_def.h', 'r') as f:
+              content = f.read()
+
+          if 'susfs_ksu_compat.h' not in content:
+              content = content.replace(
+                  '#endif // #ifndef KSU_SUSFS_DEF_H',
+                  '#include <linux/susfs_ksu_compat.h>\n#endif // #ifndef KSU_SUSFS_DEF_H'
+              )
+              with open('include/linux/susfs_def.h', 'w') as f:
+                  f.write(content)
+              print('[+] susfs_def.h 已链接 compat header')
+          else:
+              print('[+] susfs_def.h 已包含 compat header')
+          PYEOF
+
           # 2) 应用内核侧补丁
           echo "[+] 应用内核侧补丁 (50_add_susfs_in_kernel-4.14.patch) ..."
           REJ_DIR="${{ github.workspace }}/susfs_rejects"
