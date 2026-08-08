@@ -312,7 +312,7 @@ jobs:
             cp -v "$SUSFS_SRC/kernel_patches/include/linux/susfs_def.h" include/linux/
           fi
 
-          # 1.5) 创建 ReSukiSU 兼容层头文件并链接到 susfs_def.h
+                    # 1.5) 创建 ReSukiSU 兼容层头文件并链接到 susfs_def.h
           echo "[+] 创建 susfs_ksu_compat.h 兼容层 ..."
 
           cat > include/linux/susfs_ksu_compat.h << 'EOF'
@@ -321,58 +321,14 @@ jobs:
           /*
            * Bridge header for ReSukiSU / SukiSU-Ultra builtin branch.
            * ReSukiSU expects SUSFS v2.2.0 API but kernel-4.14 only has v1.5.5.
-           * This header provides typed-to-void bridges and no-op stubs.
+           * This header provides no-op stubs for missing APIs.
            */
           #include <linux/susfs.h>
 
-          /* ===== Typed-to-void bridges for existing v1.5.5 functions ===== */
-          static inline void ksu_susfs_add_sus_path(void __user **p)
-          {
-          #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-              susfs_add_sus_path((struct st_susfs_sus_path __user *)*p);
-          #endif
-          }
-          static inline void ksu_susfs_add_sus_kstat(void __user **p)
-          {
-          #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-              susfs_add_sus_kstat((struct st_susfs_sus_kstat __user *)*p);
-          #endif
-          }
-          static inline void ksu_susfs_update_sus_kstat(void __user **p)
-          {
-          #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-              susfs_update_sus_kstat((struct st_susfs_sus_kstat __user *)*p);
-          #endif
-          }
-          static inline void ksu_susfs_set_uname(void __user **p)
-          {
-          #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
-              susfs_set_uname((struct st_susfs_uname __user *)*p);
-          #endif
-          }
-          static inline void ksu_susfs_set_cmdline(void __user **p)
-          {
-          #ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
-              susfs_set_cmdline_or_bootconfig((char __user *)*p);
-          #endif
-          }
-          static inline void ksu_susfs_add_open_redirect(void __user **p)
-          {
-          #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-              susfs_add_open_redirect((struct st_susfs_open_redirect __user *)*p);
-          #endif
-          }
-
-          /* ===== No-op stubs for v2.2.0 APIs not in v1.5.5 ===== */
-          #define susfs_add_sus_path(p) ksu_susfs_add_sus_path(p)
+          /* ===== No-op stubs for v2.2.0 APIs NOT in v1.5.5 ===== */
+          /* These functions do not exist in 1.5.5, so we provide stubs. */
           #define susfs_add_sus_path_loop(p) do { (void)(p); } while(0)
           #define susfs_set_hide_sus_mnts_for_non_su_procs(p) do { (void)(p); } while(0)
-          #define susfs_add_sus_kstat(p) ksu_susfs_add_sus_kstat(p)
-          #define susfs_update_sus_kstat(p) ksu_susfs_update_sus_kstat(p)
-          #define susfs_set_uname(p) ksu_susfs_set_uname(p)
-          #define susfs_enable_log(p) susfs_set_log(true)
-          #define susfs_set_cmdline_or_bootconfig(p) ksu_susfs_set_cmdline(p)
-          #define susfs_add_open_redirect(p) ksu_susfs_add_open_redirect(p)
           #define susfs_add_sus_map(p) do { (void)(p); } while(0)
           #define susfs_set_avc_log_spoofing(p) do { (void)(p); } while(0)
           #define susfs_get_enabled_features(p) do { (void)(p); } while(0)
@@ -394,10 +350,7 @@ jobs:
           echo "[+] 兼容层创建完成"
 
           echo "[+] 链接 susfs_ksu_compat.h 到 susfs_def.h ..."
-          # 在 susfs_def.h 的 #endif 之前插入 #include <linux/susfs_ksu_compat.h>
-          # 这样所有包含 susfs_def.h 的文件（包括 task_mmu.c）都能获得 compat API
           sed -i '/#endif \/\/ #ifndef KSU_SUSFS_DEF_H/i #include <linux/susfs_ksu_compat.h>' include/linux/susfs_def.h
-
           echo "[+] susfs_def.h 已链接 compat header"
           # 2) 应用内核侧补丁
           echo "[+] 应用内核侧补丁 (50_add_susfs_in_kernel-4.14.patch) ..."
