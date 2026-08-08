@@ -261,7 +261,28 @@ jobs:
           echo -e "CONFIG_KALLSYMS_ABSOLUTE_PERCPU=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
 
           cat arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-
+                # ── 6.1 Patch ReSukiSU dispatch.c 包含 compat header ──
+      - name: Patch ReSukiSU dispatch.c
+        if: inputs.ksu_enabled && inputs.susfs_enabled
+        working-directory: ${{ env.KERNEL_NAME }}
+        run: |
+          DISPATCH="drivers/kernelsu/supercall/dispatch.c"
+          if [ -f "$DISPATCH" ] && ! grep -q "susfs_ksu_compat.h" "$DISPATCH"; then
+            sed -i '/#include <linux\/susfs.h>/a #include <linux/susfs_ksu_compat.h>' "$DISPATCH"
+            echo "[+] 已添加 susfs_ksu_compat.h 到 dispatch.c"
+          fi
+          
+          SUCOMPAT="drivers/kernelsu/feature/sucompat.c"
+          if [ -f "$SUCOMPAT" ] && ! grep -q "susfs_ksu_compat.h" "$SUCOMPAT"; then
+            sed -i '/#include <linux\/susfs.h>/a #include <linux/susfs_ksu_compat.h>' "$SUCOMPAT"
+            echo "[+] 已添加 susfs_ksu_compat.h 到 sucompat.c"
+          fi
+          
+          UMOUNT="drivers/kernelsu/feature/kernel_umount.c"
+          if [ -f "$UMOUNT" ] && ! grep -q "susfs_ksu_compat.h" "$UMOUNT"; then
+            sed -i '/#include <linux\/susfs.h>/a #include <linux/susfs_ksu_compat.h>' "$UMOUNT"
+            echo "[+] 已添加 susfs_ksu_compat.h 到 kernel_umount.c"
+          fi
             
                 # ── 6.5 集成 SUSFS (kernel-4.14 分支最新 = v1.5.5) ──
       - name: 集成 SUSFS (4.14 最新分支)
@@ -291,76 +312,93 @@ jobs:
             cp -v "$SUSFS_SRC/kernel_patches/include/linux/susfs_def.h" include/linux/
           fi
 
-                    # 1.5) 补全 ReSukiSU 期望的 2.2.0 API（在 1.5.5 基线上 stub）
-          echo "[+] 补全 ReSukiSU 期望的 SUSFS 2.2.0 API ..."
+          # 1.5) 创建 ReSukiSU 兼容层头文件并链接到 susfs_def.h
+          echo "[+] 创建 susfs_ksu_compat.h 兼容层 ..."
 
-          # 在 susfs_def.h 的 #endif 之前插入宏定义 + 函数声明
-          # task_mmu.c 包含的是 susfs_def.h，不是 susfs.h！
-          sed -i '/#endif \/\/ #ifndef KSU_SUSFS_DEF_H/i\
-          /* ===== ReSukiSU compat: 2.2.0 definitions ===== */\
-          #define SUSFS_MAGIC                             0xFAFAFAFA\
-          #define CMD_SUSFS_ADD_SUS_PATH_LOOP             0x55553\
-          #define CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS 0x55561\
-          #define CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING       0x60010\
-          #define CMD_SUSFS_ADD_SUS_MAP                   0x60020\
-          #define SUSFS_MAX_VERSION_BUFSIZE               16\
-          #define SUSFS_MAX_VARIANT_BUFSIZE               16\
-          #define SUSFS_ENABLED_FEATURES_SIZE             8192\
-          #define VFSMOUNT_MNT_FLAGS_KSU_UNSHARED_MNT     0x80000000\
-          #define DEFAULT_KSU_MNT_ID                      2000000000\
-          #define DEFAULT_KSU_MNT_GROUP_ID                200000\
-          #define TIF_PROC_UMOUNTED                       33\
-          #define AS_FLAGS_SUS_MAP                        39\
-          int susfs_sus_map(struct seq_file *m, struct vm_area_struct *vma, int is_pid);\
-          ' include/linux/susfs_def.h
+          cat > include/linux/susfs_ksu_compat.h << 'EOF'
+          #ifndef KSU_SUSFS_COMPAT_H
+          #define KSU_SUSFS_COMPAT_H
+          /*
+           * Bridge header for ReSukiSU / SukiSU-Ultra builtin branch.
+           * ReSukiSU expects SUSFS v2.2.0 API but kernel-4.14 only has v1.5.5.
+           * This header provides typed-to-void bridges and no-op stubs.
+           */
+          #include <linux/susfs.h>
 
-          # 在 susfs.h 的 #endif 之前也插入声明（供 susfs.c 和其他文件使用）
-          sed -i '/#endif \/\/ #ifndef KSU_SUSFS_H/i\
-          /* ===== ReSukiSU compat: 2.2.0 function stubs ===== */\
-          int susfs_add_sus_path_loop(void __user *user_info);\
-          int susfs_set_hide_sus_mnts_for_non_su_procs(void __user *user_info);\
-          int susfs_add_sus_map(void __user *user_info);\
-          int susfs_set_avc_log_spoofing(void __user *user_info);\
-          void susfs_start_sdcard_monitor_fn(void);\
-          int susfs_sus_map(struct seq_file *m, struct vm_area_struct *vma, int is_pid);\
-          ' include/linux/susfs.h
+          /* ===== Typed-to-void bridges for existing v1.5.5 functions ===== */
+          static inline void ksu_susfs_add_sus_path(void __user **p)
+          {
+          #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+              susfs_add_sus_path((struct st_susfs_sus_path __user *)*p);
+          #endif
+          }
+          static inline void ksu_susfs_add_sus_kstat(void __user **p)
+          {
+          #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+              susfs_add_sus_kstat((struct st_susfs_sus_kstat __user *)*p);
+          #endif
+          }
+          static inline void ksu_susfs_update_sus_kstat(void __user **p)
+          {
+          #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+              susfs_update_sus_kstat((struct st_susfs_sus_kstat __user *)*p);
+          #endif
+          }
+          static inline void ksu_susfs_set_uname(void __user **p)
+          {
+          #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+              susfs_set_uname((struct st_susfs_uname __user *)*p);
+          #endif
+          }
+          static inline void ksu_susfs_set_cmdline(void __user **p)
+          {
+          #ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+              susfs_set_cmdline_or_bootconfig((char __user *)*p);
+          #endif
+          }
+          static inline void ksu_susfs_add_open_redirect(void __user **p)
+          {
+          #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+              susfs_add_open_redirect((struct st_susfs_open_redirect __user *)*p);
+          #endif
+          }
 
-          # 追加函数实现到 susfs.c
-          cat >> fs/susfs.c << 'EOF'
+          /* ===== No-op stubs for v2.2.0 APIs not in v1.5.5 ===== */
+          #define susfs_add_sus_path(p) ksu_susfs_add_sus_path(p)
+          #define susfs_add_sus_path_loop(p) do { (void)(p); } while(0)
+          #define susfs_set_hide_sus_mnts_for_non_su_procs(p) do { (void)(p); } while(0)
+          #define susfs_add_sus_kstat(p) ksu_susfs_add_sus_kstat(p)
+          #define susfs_update_sus_kstat(p) ksu_susfs_update_sus_kstat(p)
+          #define susfs_set_uname(p) ksu_susfs_set_uname(p)
+          #define susfs_enable_log(p) susfs_set_log(true)
+          #define susfs_set_cmdline_or_bootconfig(p) ksu_susfs_set_cmdline(p)
+          #define susfs_add_open_redirect(p) ksu_susfs_add_open_redirect(p)
+          #define susfs_add_sus_map(p) do { (void)(p); } while(0)
+          #define susfs_set_avc_log_spoofing(p) do { (void)(p); } while(0)
+          #define susfs_get_enabled_features(p) do { (void)(p); } while(0)
+          #define susfs_show_variant(p) do { (void)(p); } while(0)
+          #define susfs_show_version(p) do { (void)(p); } while(0)
+          #define susfs_start_sdcard_monitor_fn() do {} while(0)
 
-          /* ===== ReSukiSU compat: 2.2.0 function stubs ===== */
-          int susfs_add_sus_path_loop(void __user *user_info) {
-              (void)user_info;
-              pr_info("susfs: susfs_add_sus_path_loop is not implemented in v1.5.5\n");
-              return -ENOTSUPP;
-          }
-          int susfs_set_hide_sus_mnts_for_non_su_procs(void __user *user_info) {
-              (void)user_info;
-              pr_info("susfs: susfs_set_hide_sus_mnts_for_non_su_procs is not implemented in v1.5.5\n");
-              return -ENOTSUPP;
-          }
-          int susfs_add_sus_map(void __user *user_info) {
-              (void)user_info;
-              pr_info("susfs: susfs_add_sus_map is not implemented in v1.5.5\n");
-              return -ENOTSUPP;
-          }
-          int susfs_set_avc_log_spoofing(void __user *user_info) {
-              (void)user_info;
-              pr_info("susfs: susfs_set_avc_log_spoofing is not implemented in v1.5.5\n");
-              return -ENOTSUPP;
-          }
-          void susfs_start_sdcard_monitor_fn(void) {
-              pr_info("susfs: susfs_start_sdcard_monitor_fn is not implemented in v1.5.5\n");
-          }
-          int susfs_sus_map(struct seq_file *m, struct vm_area_struct *vma, int is_pid) {
-              (void)m;
-              (void)vma;
-              (void)is_pid;
-              return 0;
-          }
+          /* ===== ReSukiSU specific stubs ===== */
+          static inline bool susfs_is_current_proc_umounted(void) { return false; }
+          static inline void susfs_set_current_proc_umounted(void) {}
+          static inline void susfs_extra_works(void) {}
+
+          #endif /* KSU_SUSFS_COMPAT_H */
           EOF
 
-          echo "[+] API 补全完成"
+          # 去除 YAML 缩进引入的前导 10 个空格
+          sed -i 's/^          //' include/linux/susfs_ksu_compat.h
+
+          echo "[+] 兼容层创建完成"
+
+          echo "[+] 链接 susfs_ksu_compat.h 到 susfs_def.h ..."
+          # 在 susfs_def.h 的 #endif 之前插入 #include <linux/susfs_ksu_compat.h>
+          # 这样所有包含 susfs_def.h 的文件（包括 task_mmu.c）都能获得 compat API
+          sed -i '/#endif \/\/ #ifndef KSU_SUSFS_DEF_H/i #include <linux/susfs_ksu_compat.h>' include/linux/susfs_def.h
+
+          echo "[+] susfs_def.h 已链接 compat header"
           # 2) 应用内核侧补丁
           echo "[+] 应用内核侧补丁 (50_add_susfs_in_kernel-4.14.patch) ..."
           REJ_DIR="${{ github.workspace }}/susfs_rejects"
@@ -773,6 +811,28 @@ jobs:
                   pr_info(\"Something wrong with ksu_handle_setresuid()\\\\n\");\\
           }\\
           #endif" kernel/sys.c
+                    # 补全 fs/stat.c 中缺失的 KernelSU stat hook 声明
+          if os.path.exists('fs/stat.c'):
+              with open('fs/stat.c', 'r') as f:
+                  content = f.read()
+              
+              # 检查是否有调用但没有声明
+              missing_decls = []
+              if 'ksu_handle_newfstat_ret' in content and 'extern int ksu_handle_newfstat_ret' not in content:
+                  missing_decls.append('extern int ksu_handle_newfstat_ret(struct kstat *stat);')
+              if 'ksu_handle_fstat64_ret' in content and 'extern int ksu_handle_fstat64_ret' not in content:
+                  missing_decls.append('extern int ksu_handle_fstat64_ret(struct kstat *stat);')
+              
+              if missing_decls:
+                  decl_block = '#ifdef CONFIG_KSU\n' + '\n'.join(missing_decls) + '\n#endif\n'
+                  # 插入到 #include <linux/susfs_def.h> 之后
+                  content = content.replace(
+                      '#include <linux/susfs_def.h>\n',
+                      '#include <linux/susfs_def.h>\n' + decl_block
+                  )
+                  with open('fs/stat.c', 'w') as f:
+                      f.write(content)
+                  print(f"  已添加 stat hook 声明到 fs/stat.c: {missing_decls}")
 
           if grep -q "ksu_handle_setresuid" kernel/sys.c; then
             echo "  kernel/sys.c 验证通过"
