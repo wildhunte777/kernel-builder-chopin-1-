@@ -291,7 +291,7 @@ jobs:
             cp -v "$SUSFS_SRC/kernel_patches/include/linux/susfs_def.h" include/linux/
           fi
 
-                    # 1.5) 补全 ReSukiSU 期望的 2.2.0 API（在 1.5.5 基线上 stub）
+          # 1.5) 补全 ReSukiSU 期望的 2.2.0 API（在 1.5.5 基线上 stub）
           echo "[+] 补全 ReSukiSU 期望的 SUSFS 2.2.0 API ..."
 
           # 在 susfs_def.h 的 #endif 之前插入宏定义
@@ -320,9 +320,10 @@ jobs:
           int susfs_add_sus_map(void __user *user_info);\
           int susfs_set_avc_log_spoofing(void __user *user_info);\
           void susfs_start_sdcard_monitor_fn(void);\
+          int susfs_sus_map(struct seq_file *m, struct vm_area_struct *vma, int is_pid);\
           ' include/linux/susfs.h
 
-          # 追加函数实现到 susfs.c（在文件末尾，C 文件没有 #endif 问题）
+          # 追加函数实现到 susfs.c
           cat >> fs/susfs.c << 'EOF'
 
           /* ===== ReSukiSU compat: 2.2.0 function stubs ===== */
@@ -348,6 +349,12 @@ jobs:
           }
           void susfs_start_sdcard_monitor_fn(void) {
               pr_info("susfs: susfs_start_sdcard_monitor_fn is not implemented in v1.5.5\n");
+          }
+          int susfs_sus_map(struct seq_file *m, struct vm_area_struct *vma, int is_pid) {
+              (void)m;
+              (void)vma;
+              (void)is_pid;
+              return 0;
           }
           EOF
 
