@@ -354,29 +354,38 @@ jobs:
           sed -i '/#endif \/\/ #ifndef KSU_SUSFS_DEF_H/i #include <linux/susfs_ksu_compat.h>' include/linux/susfs_def.h
           echo "[+] susfs_def.h 已链接 compat header"
 
-          # 1.6) 追加 ReSukiSU stub 实现到 susfs.c
+                   # 1.6) 追加 ReSukiSU stub 实现到 susfs.c
           echo "[+] 追加 stub 实现到 fs/susfs.c ..."
           cat >> fs/susfs.c << 'EOF'
 
           /* ===== ReSukiSU compat: work_struct and stubs ===== */
           struct work_struct susfs_extra_works;
 
+          #undef susfs_add_sus_path_loop
           int susfs_add_sus_path_loop(void __user *user_info) {
               (void)user_info;
               return -ENOTSUPP;
           }
+
+          #undef susfs_set_hide_sus_mnts_for_non_su_procs
           int susfs_set_hide_sus_mnts_for_non_su_procs(void __user *user_info) {
               (void)user_info;
               return -ENOTSUPP;
           }
+
+          #undef susfs_add_sus_map
           int susfs_add_sus_map(void __user *user_info) {
               (void)user_info;
               return -ENOTSUPP;
           }
+
+          #undef susfs_set_avc_log_spoofing
           int susfs_set_avc_log_spoofing(void __user *user_info) {
               (void)user_info;
               return -ENOTSUPP;
           }
+
+          #undef susfs_start_sdcard_monitor_fn
           void susfs_start_sdcard_monitor_fn(void) {
           }
           EOF
