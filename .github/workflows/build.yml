@@ -284,7 +284,7 @@ jobs:
             echo "[+] 已添加 susfs_ksu_compat.h 到 kernel_umount.c"
           fi
             
-                # ── 6.5 集成 SUSFS (kernel-4.14 分支最新 = v1.5.5) ──
+       # ── 6.5 集成 SUSFS (kernel-4.14 分支最新 = v1.5.5) ──
       - name: 集成 SUSFS (4.14 最新分支)
         if: inputs.susfs_enabled && inputs.ksu_enabled
         working-directory: ${{ env.KERNEL_NAME }}
@@ -312,10 +312,10 @@ jobs:
             cp -v "$SUSFS_SRC/kernel_patches/include/linux/susfs_def.h" include/linux/
           fi
 
-                    # 1.5) 创建 ReSukiSU 兼容层头文件并链接到 susfs_def.h
+          # 1.5) 创建 ReSukiSU 兼容层头文件并链接到 susfs_def.h
           echo "[+] 创建 susfs_ksu_compat.h 兼容层 ..."
 
-                    cat > include/linux/susfs_ksu_compat.h << 'EOF'
+          cat > include/linux/susfs_ksu_compat.h << 'EOF'
           #ifndef KSU_SUSFS_COMPAT_H
           #define KSU_SUSFS_COMPAT_H
           /*
@@ -348,14 +348,39 @@ jobs:
           # 去除 YAML 缩进引入的前导 10 个空格
           sed -i 's/^          //' include/linux/susfs_ksu_compat.h
 
-          # 去除 YAML 缩进引入的前导 10 个空格
-          sed -i 's/^          //' include/linux/susfs_ksu_compat.h
-
           echo "[+] 兼容层创建完成"
 
           echo "[+] 链接 susfs_ksu_compat.h 到 susfs_def.h ..."
           sed -i '/#endif \/\/ #ifndef KSU_SUSFS_DEF_H/i #include <linux/susfs_ksu_compat.h>' include/linux/susfs_def.h
           echo "[+] susfs_def.h 已链接 compat header"
+
+          # 1.6) 追加 ReSukiSU stub 实现到 susfs.c
+          echo "[+] 追加 stub 实现到 fs/susfs.c ..."
+          cat >> fs/susfs.c << 'EOF'
+
+          /* ===== ReSukiSU compat: work_struct and stubs ===== */
+          struct work_struct susfs_extra_works;
+
+          int susfs_add_sus_path_loop(void __user *user_info) {
+              (void)user_info;
+              return -ENOTSUPP;
+          }
+          int susfs_set_hide_sus_mnts_for_non_su_procs(void __user *user_info) {
+              (void)user_info;
+              return -ENOTSUPP;
+          }
+          int susfs_add_sus_map(void __user *user_info) {
+              (void)user_info;
+              return -ENOTSUPP;
+          }
+          int susfs_set_avc_log_spoofing(void __user *user_info) {
+              (void)user_info;
+              return -ENOTSUPP;
+          }
+          void susfs_start_sdcard_monitor_fn(void) {
+          }
+          EOF
+
           # 2) 应用内核侧补丁
           echo "[+] 应用内核侧补丁 (50_add_susfs_in_kernel-4.14.patch) ..."
           REJ_DIR="${{ github.workspace }}/susfs_rejects"
@@ -435,93 +460,6 @@ jobs:
             } >> "$DEFCONFIG"
             echo "[+] SUSFS 配置写入完成"
           fi
-          # 2) 应用内核侧补丁
-          echo "[+] 应用内核侧补丁 (50_add_susfs_in_kernel-4.14.patch) ..."
-          REJ_DIR="${{ github.workspace }}/susfs_rejects"
-          mkdir -p "$REJ_DIR"
-          
-          if git apply --check "$PATCH_FILE" >/dev/null 2>&1; then
-            git apply "$PATCH_FILE"
-            echo "[+] 内核补丁干净应用成功"
-          else
-            echo "::warning::内核补丁无法干净应用，强制应用并收集冲突 ..."
-            git apply --reject "$PATCH_FILE" || true
-            
-            find . -name "*.rej" -type f | while read -r rej; do
-              echo "  发现 reject 文件: $rej"
-              cp -v "$rej" "$REJ_DIR/"
-            done
-          fi
-          
-          # 清理 .rej/.orig
-          find . -name "*.rej" -type f -delete
-          find . -name "*.orig" -type f -delete
-          
-          # 3) 检查关键文件是否有冲突
-          if [ -f "fs/proc/task_mmu.c.rej" ] || [ -f "kernel/sys.c.rej" ]; then
-            echo "::warning::关键文件补丁冲突，但继续构建（请确认已手动修复）"
-          fi
-          
-          if [ "$(ls -A "$REJ_DIR")" ]; then
-            echo "::warning::发现非关键补丁冲突，.rej 文件已收集"
-          fi
-
-          # 4) 应用 KernelSU 侧补丁（仅标准 KernelSU 需要，ReSukiSU 已内置）
-          echo "[+] 检查是否需要 KernelSU 侧补丁 ..."
-          if [ -f "kernel/core_hook.c" ] && [ -f "kernel/ksu.c" ]; then
-            echo "[+] 检测到标准 KernelSU，应用 SUSFS KernelSU 侧补丁 ..."
-            KSU_PATCH="$SUSFS_SRC/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
-            if git apply --check "$KSU_PATCH" >/dev/null 2>&1; then
-              git apply "$KSU_PATCH"
-              echo "[+] KernelSU 补丁应用成功"
-            else
-              echo "::warning::KernelSU 补丁无法应用，跳过"
-            fi
-          else
-            echo "[+] 检测到 ReSukiSU（已内置 SUSFS 支持），跳过 KernelSU 侧补丁"
-          fi
-
-          # 5) 修改 fs/Makefile 添加 susfs.o
-          echo "[+] 修改 fs/Makefile ..."
-          if ! grep -q "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" fs/Makefile; then
-            echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile
-            echo "[+] 已追加 susfs.o 到 fs/Makefile"
-          else
-            echo "[+] fs/Makefile 已包含 susfs.o，跳过"
-          fi
-
-          # 6) 追加 SUSFS 内核配置
-          echo "[+] 写入 SUSFS 内核配置 ..."
-          DEFCONFIG="arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}"
-          if grep -q "CONFIG_KSU_SUSFS=y" "$DEFCONFIG" 2>/dev/null; then
-            echo "[+] SUSFS 配置已存在，跳过"
-          else
-            {
-              echo ""
-              echo "# ===== SUSFS support (4.14 non-GKI) ====="
-              echo "CONFIG_KSU_SUSFS=y"
-              echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
-              echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
-              echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
-              echo "CONFIG_KSU_SUSFS_SUS_MAP=y"
-              echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y"
-              echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
-              echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
-              echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y"
-              echo "# 4.14 non-GKI 禁用以下选项（会导致 bootloop 或不兼容）"
-              echo "# CONFIG_KSU_SUSFS_SUS_SU is not set"
-              echo "CONFIG_KSU_SUSFS_MNT_ID_REORDER=y"
-            } >> "$DEFCONFIG"
-            echo "[+] SUSFS 配置写入完成"
-          fi
-      - name: 上传 SUSFS reject 文件
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: susfs-rejects-${{ github.run_id }}
-          path: ${{ github.workspace }}/susfs_rejects/
-          if-no-files-found: ignore
-          retention-days: 7
       # ── 6.8 清理 Manual Hook 残留并补全 Required Hooks ──
       - name: 清理 Manual Hook 并补全 Required Hooks
         if: inputs.ksu_enabled && inputs.susfs_enabled
