@@ -291,10 +291,11 @@ jobs:
             cp -v "$SUSFS_SRC/kernel_patches/include/linux/susfs_def.h" include/linux/
           fi
 
-          # 1.5) 补全 ReSukiSU 期望的 2.2.0 API（在 1.5.5 基线上 stub）
+                    # 1.5) 补全 ReSukiSU 期望的 2.2.0 API（在 1.5.5 基线上 stub）
           echo "[+] 补全 ReSukiSU 期望的 SUSFS 2.2.0 API ..."
 
-          # 在 susfs_def.h 的 #endif 之前插入宏定义
+          # 在 susfs_def.h 的 #endif 之前插入宏定义 + 函数声明
+          # task_mmu.c 包含的是 susfs_def.h，不是 susfs.h！
           sed -i '/#endif \/\/ #ifndef KSU_SUSFS_DEF_H/i\
           /* ===== ReSukiSU compat: 2.2.0 definitions ===== */\
           #define SUSFS_MAGIC                             0xFAFAFAFA\
@@ -310,9 +311,10 @@ jobs:
           #define DEFAULT_KSU_MNT_GROUP_ID                200000\
           #define TIF_PROC_UMOUNTED                       33\
           #define AS_FLAGS_SUS_MAP                        39\
+          int susfs_sus_map(struct seq_file *m, struct vm_area_struct *vma, int is_pid);\
           ' include/linux/susfs_def.h
 
-          # 在 susfs.h 的 #endif 之前插入函数声明
+          # 在 susfs.h 的 #endif 之前也插入声明（供 susfs.c 和其他文件使用）
           sed -i '/#endif \/\/ #ifndef KSU_SUSFS_H/i\
           /* ===== ReSukiSU compat: 2.2.0 function stubs ===== */\
           int susfs_add_sus_path_loop(void __user *user_info);\
