@@ -443,6 +443,9 @@ jobs:
           static inline int susfs_sus_map(void *m, void *vma, int is_pid)
           { (void)m; (void)vma; (void)is_pid; return 0; }
 
+          /* ===== KernelSU Next optional hooks (ReSukiSU 未实现) ===== */
+          static inline int ksu_handle_newfstat_ret(struct kstat *stat) { (void)stat; return 0; }
+          static inline int ksu_handle_fstat64_ret(struct kstat *stat) { (void)stat; return 0; }
           /* ===== 函数名映射：v2.2.0 → v1.5.5 ===== */
           static inline int susfs_enable_log(void __user *user_info)
           {
