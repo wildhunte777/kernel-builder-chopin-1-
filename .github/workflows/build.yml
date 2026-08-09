@@ -1025,9 +1025,7 @@ jobs:
           else
             CC_CMD="clang"
           fi
-          if [[ "${{ inputs.fake_enabled }}" != "true" && -n "${{ inputs.kernel_suffix }}" ]]; then
-            export LOCALVERSION="-${{ inputs.kernel_suffix }}"
-          fi
+
           make -j$(nproc) \
             O=${{ env.OUT_DIR }} \
             ARCH=${{ env.ARCH }} \
@@ -1045,45 +1043,30 @@ jobs:
             OBJSIZE=llvm-size \
             ${{ env.DEFCONFIG_NAME }}
 
-
-          # ===== 关键：make defconfig 后再次追加 SUSFS 配置 =====
-          echo "[+] 确保 SUSFS 配置在 make defconfig 后仍然存在"
-          DEFCONFIG="arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}"
+          # ===== 关键：用 scripts/config 强制启用 SUSFS =====
+          echo "[+] 强制启用 SUSFS 配置..."
+          cd ${{ env.OUT_DIR }}
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SUS_PATH
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SUS_MOUNT
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SUS_KSTAT
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_TRY_UMOUNT
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SPOOF_UNAME
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_OPEN_REDIRECT
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SUS_SU
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_ENABLE_LOG
           
-          # 追加到 defconfig（确保不会被覆盖）
-          echo "CONFIG_KSU=y" >> "$DEFCONFIG"
-          echo "CONFIG_KSU_SUSFS=y" >> "$DEFCONFIG"
-          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "$DEFCONFIG"
-          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> "$DEFCONFIG"
-          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> "$DEFCONFIG"
-          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> "$DEFCONFIG"
-          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> "$DEFCONFIG"
-          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> "$DEFCONFIG"
-          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> "$DEFCONFIG"
-          echo "CONFIG_KSU_SUSFS_SUS_SU=y" >> "$DEFCONFIG"
-          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> "$DEFCONFIG"
-          
-          # 重新生成 .config，确保追加的配置生效
+          # 同步依赖（如果依赖不满足会报错，而不是静默取消）
           make -j$(nproc) \
             O=${{ env.OUT_DIR }} \
             ARCH=${{ env.ARCH }} \
             CC="${CC_CMD}" \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            LD=ld.lld \
-            AR=llvm-ar \
-            NM=llvm-nm \
-            OBJCOPY=llvm-objcopy \
-            OBJDUMP=llvm-objdump \
-            READELF=llvm-readelf \
-            STRIP=llvm-strip \
-            OBJSIZE=llvm-size \
-            ${{ env.DEFCONFIG_NAME }}
+            oldconfig < /dev/null || true
           
-          # 验证 SUSFS 是否生效
+          # 验证
           echo "=== 验证 SUSFS 配置 ==="
-          grep "CONFIG_KSU_SUSFS" "${{ env.OUT_DIR }}/.config" | head -20
+          grep "CONFIG_KSU_SUSFS" .config | head -20
           # =====================================================
 
       - name: 编译内核与设备树
