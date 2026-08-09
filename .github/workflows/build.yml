@@ -1017,7 +1017,7 @@ jobs:
           fi
 
       # ── 9. 编译内核 ──
-       - name: 生成 defconfig
+      - name: 生成 defconfig
         working-directory: ${{ env.KERNEL_NAME }}
         run: |
           if [[ "${{ inputs.ccache_enabled }}" == "true" ]]; then
