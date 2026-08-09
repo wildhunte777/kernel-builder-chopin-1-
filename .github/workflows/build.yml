@@ -1017,10 +1017,34 @@ jobs:
           fi
 
       # ── 9. 编译内核 ──
-            - name: 生成 defconfig
+       - name: 生成 defconfig
         working-directory: ${{ env.KERNEL_NAME }}
         run: |
-          # ... 原有的 make defconfig 命令 ...
+          if [[ "${{ inputs.ccache_enabled }}" == "true" ]]; then
+            CC_CMD="ccache clang"
+          else
+            CC_CMD="clang"
+          fi
+          if [[ "${{ inputs.fake_enabled }}" != "true" && -n "${{ inputs.kernel_suffix }}" ]]; then
+            export LOCALVERSION="-${{ inputs.kernel_suffix }}"
+          fi
+          make -j$(nproc) \
+            O=${{ env.OUT_DIR }} \
+            ARCH=${{ env.ARCH }} \
+            CC="${CC_CMD}" \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            READELF=llvm-readelf \
+            STRIP=llvm-strip \
+            OBJSIZE=llvm-size \
+            ${{ env.DEFCONFIG_NAME }}
+
 
           # ===== 关键：make defconfig 后再次追加 SUSFS 配置 =====
           echo "[+] 确保 SUSFS 配置在 make defconfig 后仍然存在"
