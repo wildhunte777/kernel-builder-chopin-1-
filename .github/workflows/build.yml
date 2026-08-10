@@ -1168,7 +1168,44 @@ jobs:
             exit 1
           fi
           echo "DTB 文件校验及合并通过: ${BOOT_DIR}/dtb"
+      - name: 验证 Image 内置 config.gz
+        working-directory: ${{ env.KERNEL_NAME }}
+        run: |
+          echo "[+] 从 Image 中提取并验证 config.gz ..."
+          python3 << 'PYEOF'
+          import gzip
+          import sys
 
+          image_path = '${{ env.OUT_DIR }}/arch/arm64/boot/Image'
+          with open(image_path, 'rb') as f:
+              data = f.read()
+
+          # 查找 gzip 魔数 (1f 8b 08)
+          idx = data.find(b'\x1f\x8b\x08')
+          if idx == -1:
+              print("::error::Image 中未找到 gzip 数据 (config.gz)")
+              sys.exit(1)
+
+          try:
+              config = gzip.decompress(data[idx:])
+              config_str = config.decode('utf-8', errors='replace')
+          except Exception as e:
+              print(f"::error::解压 config.gz 失败: {e}")
+              sys.exit(1)
+
+          susfs_lines = [l for l in config_str.split('\n') if 'CONFIG_KSU_SUSFS' in l]
+          print("Image 中的 SUSFS 配置:")
+          for line in susfs_lines:
+              print(f"  {line}")
+
+          if 'CONFIG_KSU_SUSFS=y' in config_str:
+              print("✅ Image 验证通过: CONFIG_KSU_SUSFS=y")
+              sys.exit(0)
+          else:
+              print("::error::Image 验证失败: CONFIG_KSU_SUSFS 不为 y")
+              print("相关配置:", susfs_lines)
+              sys.exit(1)
+          PYEOF
       - name: 打包 AnyKernel3
         if: inputs.use_anykernel
         id: pack_anykernel
