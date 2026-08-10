@@ -1091,8 +1091,8 @@ jobs:
           # =====================================================
 
             - name: 编译内核与设备树
-        working-directory: ${{ env.KERNEL_NAME }}
-        run: |
+          working-directory: ${{ env.KERNEL_NAME }}
+          run: |
           # 强制删除 config 相关缓存，确保 config.gz 随 .config 更新
           rm -f ${{ env.OUT_DIR }}/kernel/configs.o
           rm -f ${{ env.OUT_DIR }}/kernel/configs.s
