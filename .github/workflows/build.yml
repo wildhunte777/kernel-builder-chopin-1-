@@ -1056,7 +1056,11 @@ jobs:
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SPOOF_UNAME
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_OPEN_REDIRECT
-          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SUS_SU
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SUS_OVERLAYFS
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_ENABLE_LOG
           
           # 同步依赖（如果依赖不满足会报错，而不是静默取消）
