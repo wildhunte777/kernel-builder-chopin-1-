@@ -277,7 +277,7 @@ jobs:
               sed -i '/#include <linux\/susfs_def.h>/a #include <linux/susfs_ksu_compat.h>' "$DISPATCH"
             fi
             echo "[+] 已添加 susfs_ksu_compat.h 到 dispatch.c"
-          fi
+            fi
           
           # 2) 修复 ksu_handle_susfs_cmd：susfs_xxx(arg) → susfs_xxx(*arg)
           python3 << 'PYEOF'
