@@ -243,7 +243,7 @@ jobs:
             rm -rf "./drivers/kernelsu"
           fi
 
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
+          curl -LSs "https://raw.githubusercontent.com/wildhunte777/ReSukiSU/main/kernel/setup.sh" | bash -s main
 
           echo -e "CONFIG_KSU=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           
@@ -549,98 +549,22 @@ jobs:
             echo "[+] fs/Makefile 已包含 susfs.o，跳过"
           fi
 
-                    # 5.1) 添加 SUSFS Kconfig 定义（patch 中缺失，必须手动补）
-          echo "[+] 添加 SUSFS Kconfig 定义 ..."
-          if ! grep -q "config KSU_SUSFS" fs/Kconfig 2>/dev/null; then
-              # 先确认 ReSukiSU 的 KSU Kconfig 是否存在
-              if grep -q "config KSU" drivers/kernelsu/Kconfig 2>/dev/null; then
-                  DEP="depends on KSU"
-              else
-                  DEP=""
-              fi
-              
-              cat >> fs/Kconfig << KCONFIG_EOF
-          
-          config KSU_SUSFS
-              bool "Enable SUSFS"
-              default y
-              ${DEP}
-          
-          config KSU_SUSFS_SUS_PATH
-              bool "SUSFS - Hide suspicious paths"
-              depends on KSU_SUSFS
-              default y
-          
-          config KSU_SUSFS_SUS_MOUNT
-              bool "SUSFS - Hide suspicious mounts"
-              depends on KSU_SUSFS
-              default y
-          
-          config KSU_SUSFS_SUS_KSTAT
-              bool "SUSFS - Spoof kstat"
-              depends on KSU_SUSFS
-              default y
-          
-          config KSU_SUSFS_TRY_UMOUNT
-              bool "SUSFS - Try umount"
-              depends on KSU_SUSFS
-              default y
-          
-          config KSU_SUSFS_SPOOF_UNAME
-              bool "SUSFS - Spoof uname"
-              depends on KSU_SUSFS
-              default y
-          
-          config KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
-              bool "SUSFS - Spoof cmdline or bootconfig"
-              depends on KSU_SUSFS
-              default y
-          
-          config KSU_SUSFS_OPEN_REDIRECT
-              bool "SUSFS - Open redirect"
-              depends on KSU_SUSFS
-              default y
-          
-          config KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
-              bool "SUSFS - Auto add sus ksu default mount"
-              depends on KSU_SUSFS
-              default y
-          
-          config KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
-              bool "SUSFS - Auto add sus bind mount"
-              depends on KSU_SUSFS
-              default y
-          
-          config KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
-              bool "SUSFS - Auto add try umount for bind mount"
-              depends on KSU_SUSFS
-              default y
-          
-          config KSU_SUSFS_SUS_OVERLAYFS
-              bool "SUSFS - Sus overlayfs"
-              depends on KSU_SUSFS
-              default y
-          
-          config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
-              bool "SUSFS - Hide ksu/susfs symbols"
-              depends on KSU_SUSFS
-              default y
-          
-          config KSU_SUSFS_ENABLE_LOG
-              bool "SUSFS - Enable log"
-              depends on KSU_SUSFS
-              default y
-          
-          config KSU_SUSFS_SUS_MAP
-              bool "SUSFS - Sus map"
-              depends on KSU_SUSFS
-              default y
-          KCONFIG_EOF
-              echo "[+] SUSFS Kconfig 已添加 (DEP: ${DEP:-none})"
+                  # 5.1) 导出 susfs_try_umount（SUSFS 中为 static，需改为全局供 ReSukiSU 调用）
+          echo "[+] 导出 susfs_try_umount ..."
+          if grep -q "^static void susfs_try_umount(uid_t uid)" fs/susfs.c; then
+              sed -i 's/^static void susfs_try_umount(uid_t uid)/void susfs_try_umount(uid_t uid)/' fs/susfs.c
+              echo "[+] fs/susfs.c: static → global"
           else
-              echo "[+] SUSFS Kconfig 已存在，跳过"
+              echo "[+] fs/susfs.c: susfs_try_umount 已是 global 或不存在"
           fi
-
+          
+          if ! grep -q "extern void susfs_try_umount(uid_t uid)" include/linux/susfs.h; then
+              echo "extern void susfs_try_umount(uid_t uid);" >> include/linux/susfs.h
+              echo "[+] include/linux/susfs.h: 添加 extern 声明"
+          else
+              echo "[+] include/linux/susfs.h: extern 声明已存在"
+          fi
+          
           # 6) 追加 SUSFS 内核配置
           echo "[+] 写入 SUSFS 内核配置 ..."
           DEFCONFIG="arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}"
