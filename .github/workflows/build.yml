@@ -247,12 +247,10 @@ jobs:
 
           echo -e "CONFIG_KSU=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           
-          # ===== 关键：SUSFS 启用时，ReSukiSU 自动使用 Inline Hook，必须禁用 MANUAL_HOOK =====
-          if [[ "${{ inputs.susfs_enabled }}" != "true" ]]; then
-            echo -e "CONFIG_KSU_MANUAL_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-            echo -e "CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-            echo -e "CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-          fi
+                   # MANUAL_HOOK 负责 LSM hook 注册，SUSFS 负责隐藏功能，两者独立共存
+          echo -e "CONFIG_KSU_MANUAL_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+          echo -e "CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+          echo -e "CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           # =================================================================================
           
           echo -e "CONFIG_KSU_MULTI_MANAGER_SUPPORT=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
@@ -1062,13 +1060,13 @@ jobs:
             OBJSIZE=llvm-size \
             ${{ env.DEFCONFIG_NAME }}
 
-          # ===== 关键：用 scripts/config 强制启用 SUSFS =====
           echo "[+] 强制启用 SUSFS 配置..."
           cd ${{ env.OUT_DIR }}
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SUS_PATH
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SUS_MOUNT
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SUS_KSTAT
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_TRY_UMOUNT
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SPOOF_UNAME
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_OPEN_REDIRECT
@@ -1076,7 +1074,6 @@ jobs:
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SUS_OVERLAYFS
-          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_TRY_UMOUNT
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_ENABLE_LOG
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SUS_MAP
