@@ -549,6 +549,95 @@ jobs:
             echo "[+] fs/Makefile 已包含 susfs.o，跳过"
           fi
 
+          # 5.1) 添加 SUSFS Kconfig 定义（否则 make oldconfig 会删掉 CONFIG_KSU_SUSFS）
+          echo "[+] 添加 SUSFS Kconfig 定义 ..."
+          if ! grep -q "config KSU_SUSFS" fs/Kconfig 2>/dev/null; then
+              cat >> fs/Kconfig << 'KCONFIG_EOF'
+
+          menu "SUSFS (KernelSU Hide Support)"
+
+          config KSU_SUSFS
+              bool "Enable SUSFS"
+              default y
+              depends on KSU
+
+          config KSU_SUSFS_SUS_PATH
+              bool "SUSFS - Hide suspicious paths"
+              depends on KSU_SUSFS
+              default y
+
+          config KSU_SUSFS_SUS_MOUNT
+              bool "SUSFS - Hide suspicious mounts"
+              depends on KSU_SUSFS
+              default y
+
+          config KSU_SUSFS_SUS_KSTAT
+              bool "SUSFS - Spoof kstat"
+              depends on KSU_SUSFS
+              default y
+
+                    config KSU_SUSFS_TRY_UMOUNT
+              bool "SUSFS - Try umount"
+              depends on KSU_SUSFS
+              default y
+
+          config KSU_SUSFS_SPOOF_UNAME
+              bool "SUSFS - Spoof uname"
+              depends on KSU_SUSFS
+              default y
+
+          config KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+              bool "SUSFS - Spoof cmdline or bootconfig"
+              depends on KSU_SUSFS
+              default y
+
+          config KSU_SUSFS_OPEN_REDIRECT
+              bool "SUSFS - Open redirect"
+              depends on KSU_SUSFS
+              default y
+
+          config KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
+              bool "SUSFS - Auto add sus ksu default mount"
+              depends on KSU_SUSFS
+              default y
+
+          config KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+              bool "SUSFS - Auto add sus bind mount"
+              depends on KSU_SUSFS
+              default y
+
+          config KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
+              bool "SUSFS - Auto add try umount for bind mount"
+              depends on KSU_SUSFS
+              default y
+
+          config KSU_SUSFS_SUS_OVERLAYFS
+              bool "SUSFS - Sus overlayfs"
+              depends on KSU_SUSFS
+              default y
+
+          config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+              bool "SUSFS - Hide ksu/susfs symbols"
+              depends on KSU_SUSFS
+              default y
+
+          config KSU_SUSFS_ENABLE_LOG
+              bool "SUSFS - Enable log"
+              depends on KSU_SUSFS
+              default y
+
+          config KSU_SUSFS_SUS_MAP
+              bool "SUSFS - Sus map"
+              depends on KSU_SUSFS
+              default y
+
+          endmenu
+          KCONFIG_EOF
+              echo "[+] SUSFS Kconfig 已添加"
+          else
+              echo "[+] SUSFS Kconfig 已存在，跳过"
+          fi
+
           # 6) 追加 SUSFS 内核配置
           echo "[+] 写入 SUSFS 内核配置 ..."
           DEFCONFIG="arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}"
