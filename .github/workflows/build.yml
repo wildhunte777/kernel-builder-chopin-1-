@@ -645,16 +645,15 @@ jobs:
           echo "[+] 写入 SUSFS 内核配置 ..."
           DEFCONFIG="arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}"
           if grep -q "CONFIG_KSU_SUSFS=y" "$DEFCONFIG" 2>/dev/null; then
-            echo "[+] SUSFS 配置已存在，跳过"
+              echo "[+] SUSFS 配置已存在，跳过"
           else
-            {
+              {
               echo ""
               echo "# ===== SUSFS support (4.14 non-GKI) ====="
               echo "CONFIG_KSU_SUSFS=y"
               echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
               echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
               echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
-              echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y"
               echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
               echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
               echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
@@ -662,10 +661,13 @@ jobs:
               echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y"
               echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y"
               echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y"
+              echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y"
               echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
               echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y"
-            } >> "$DEFCONFIG"
-            echo "[+] SUSFS 配置写入完成"
+              echo "CONFIG_KSU_SUSFS_SUS_MAP=y"
+              } >> "$DEFCONFIG"
+              echo "[+] SUSFS 配置写入完成"
+          fi
           fi
             # ── 6.6 调试：打印关键文件内容后退出 ──
       - name: 调试打印关键文件并退出
@@ -1144,7 +1146,6 @@ jobs:
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SUS_PATH
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SUS_MOUNT
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SUS_KSTAT
-          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_TRY_UMOUNT
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SPOOF_UNAME
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_OPEN_REDIRECT
@@ -1152,8 +1153,10 @@ jobs:
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SUS_OVERLAYFS
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_TRY_UMOUNT
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_ENABLE_LOG
+          ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SUS_MAP
           
           # 同步依赖（如果依赖不满足会报错，而不是静默取消）
           make -j$(nproc) \
