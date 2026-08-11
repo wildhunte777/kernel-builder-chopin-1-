@@ -32,13 +32,13 @@ on:
   workflow_dispatch:
     inputs:
       ksu_enabled:
-        description: '是否集成 ReSukiSU (Manual Hook)'
+        description: '是否集成 SukiSU-Ultra (Manual Hook)'
         required: true
         type: boolean
         default: true
 
       susfs_enabled:
-        description: '是否集成 SUSFS (隐藏模块/路径/挂载，需 ReSukiSU)'
+        description: '是否集成 SUSFS (隐藏模块/路径/挂载，需 SukiSU-Ultra)'
         required: true
         type: boolean
         default: true
@@ -60,7 +60,7 @@ on:
         required: true
         type: boolean
         default: false
-        
+
       ccache_enabled:
         description: '是否启用 ccache 加速编译'
         required: true
@@ -123,7 +123,7 @@ on:
 
 jobs:
   # ============================================================
-  #  构建内核
+  # 构建内核
   # ============================================================
   build:
     name: 构建内核
@@ -179,14 +179,14 @@ jobs:
           do.cleanup=1
           do.cleanuponabort=0
           '; }
-          
+
           BLOCK=auto;
           IS_SLOT_DEVICE=auto;
           RAMDISK_COMPRESSION=auto;
           PATCH_VBMETA_FLAG=auto;
-          
+
           . tools/ak3-core.sh;
-          
+
           split_boot;
           flash_boot;
           EOF
@@ -231,8 +231,8 @@ jobs:
             done
           fi
 
-      # ── 6. 集成 ReSukiSU ──
-      - name: 集成 ReSukiSU
+      # ── 6. 集成 SukiSU-Ultra ──
+      - name: 集成 SukiSU-Ultra
         if: inputs.ksu_enabled
         working-directory: ${{ env.KERNEL_NAME }}
         run: |
@@ -243,85 +243,18 @@ jobs:
             rm -rf "./drivers/kernelsu"
           fi
 
-          curl -LSs "https://raw.githubusercontent.com/wildhunte777/ReSukiSU/main/kernel/setup.sh" | bash -s main
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s nongki
 
           echo -e "CONFIG_KSU=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-          
-                   # MANUAL_HOOK 负责 LSM hook 注册，SUSFS 负责隐藏功能，两者独立共存
           echo -e "CONFIG_KSU_MANUAL_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-          echo -e "CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-          
-          # =================================================================================
-          
-          echo -e "CONFIG_KSU_MULTI_MANAGER_SUPPORT=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+          echo -e "CONFIG_KPM=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           echo -e "CONFIG_KALLSYMS=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           echo -e "CONFIG_KALLSYMS_ALL=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           echo -e "CONFIG_KALLSYMS_ABSOLUTE_PERCPU=y" >> arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
 
           cat arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-          
-        # ── 6.1 Patch ReSukiSU dispatch.c 包含 compat header ──
-      - name: Patch ReSukiSU dispatch.c
-        if: inputs.ksu_enabled && inputs.susfs_enabled
-        working-directory: ${{ env.KERNEL_NAME }}
-        run: |
-          DISPATCH="drivers/kernelsu/supercall/dispatch.c"
-          
-          # 1) 添加 compat header（匹配 susfs.h 或 susfs_def.h）
-          if [ -f "$DISPATCH" ] && ! grep -q "susfs_ksu_compat.h" "$DISPATCH"; then
-            if grep -q '#include <linux/susfs.h>' "$DISPATCH"; then
-              sed -i '/#include <linux\/susfs.h>/a #include <linux/susfs_ksu_compat.h>' "$DISPATCH"
-            else
-              sed -i '/#include <linux\/susfs_def.h>/a #include <linux/susfs_ksu_compat.h>' "$DISPATCH"
-            fi
-            echo "[+] 已添加 susfs_ksu_compat.h 到 dispatch.c"
-          fi
-          
-          # 2) 修复 ksu_handle_susfs_cmd：susfs_xxx(arg) → susfs_xxx(*arg)
-          python3 << 'PYEOF'
-          import re
 
-          with open('drivers/kernelsu/supercall/dispatch.c', 'r') as f:
-              content = f.read()
-
-          pattern = r'(int ksu_handle_susfs_cmd\(unsigned int cmd, void __user \*\*arg\)\s*\{)(.*?)(\n\}\s*\n#endif)'
-
-          def fix_body(m):
-              header, body, footer = m.group(1), m.group(2), m.group(3)
-              
-              body = re.sub(
-                  r'\b(susfs_add_sus_path|susfs_add_sus_path_loop|susfs_set_hide_sus_mnts_for_non_su_procs|susfs_add_sus_kstat|susfs_update_sus_kstat|susfs_set_uname|susfs_set_cmdline_or_bootconfig|susfs_add_open_redirect|susfs_add_sus_map|susfs_set_avc_log_spoofing|susfs_get_enabled_features|susfs_show_variant|susfs_show_version)\(arg\);',
-                  r'\1(*arg);',
-                  body
-              )
-              
-              body = body.replace('susfs_enable_log(arg);', 'susfs_enable_log(*arg);')
-              
-              return header + body + footer
-
-          new_content = re.sub(pattern, fix_body, content, flags=re.DOTALL)
-          
-          if new_content == content:
-              print("::warning::dispatch.c 正则未匹配到 ksu_handle_susfs_cmd")
-          else:
-              with open('drivers/kernelsu/supercall/dispatch.c', 'w') as f:
-                  f.write(new_content)
-              print("[+] dispatch.c 已修复：arg -> *arg")
-          PYEOF
-          
-          SUCOMPAT="drivers/kernelsu/feature/sucompat.c"
-          if [ -f "$SUCOMPAT" ] && ! grep -q "susfs_ksu_compat.h" "$SUCOMPAT"; then
-            sed -i '/#include <linux\/susfs.h>/a #include <linux/susfs_ksu_compat.h>' "$SUCOMPAT"
-            echo "[+] 已添加 susfs_ksu_compat.h 到 sucompat.c"
-          fi
-          
-          UMOUNT="drivers/kernelsu/feature/kernel_umount.c"
-          if [ -f "$UMOUNT" ] && ! grep -q "susfs_ksu_compat.h" "$UMOUNT"; then
-            sed -i '/#include <linux\/susfs.h>/a #include <linux/susfs_ksu_compat.h>' "$UMOUNT"
-            echo "[+] 已添加 susfs_ksu_compat.h 到 kernel_umount.c"
-          fi
-            
-       # ── 6.5 集成 SUSFS (kernel-4.14 分支最新 = v1.5.5) ──
+      # ── 6.5 集成 SUSFS (kernel-4.14 分支最新 = v1.5.5) ──
       - name: 集成 SUSFS (4.14 最新分支)
         if: inputs.susfs_enabled && inputs.ksu_enabled
         working-directory: ${{ env.KERNEL_NAME }}
@@ -336,12 +269,6 @@ jobs:
           git clone --depth=1 --branch "kernel-4.14" \
             https://gitlab.com/simonpunk/susfs4ksu.git "$SUSFS_SRC"
 
-          # 验证实际版本
-          echo "[+] 验证 SUSFS 版本 ..."
-          grep -r "SUSFS_VERSION" "$SUSFS_SRC/kernel_patches/include/linux/susfs.h" 2>/dev/null || true
-          head -20 "$SUSFS_SRC/kernel_patches/fs/susfs.c" | grep -i "version\|susfs" || true
-
-          # 1) 复制核心文件
           echo "[+] 复制 SUSFS 核心文件 ..."
           cp -v "$SUSFS_SRC/kernel_patches/fs/susfs.c" fs/
           cp -v "$SUSFS_SRC/kernel_patches/include/linux/susfs.h" include/linux/
@@ -349,227 +276,52 @@ jobs:
             cp -v "$SUSFS_SRC/kernel_patches/include/linux/susfs_def.h" include/linux/
           fi
 
-          # 1.5) 创建完整的 ReSukiSU v2.2.0 → SUSFS v1.5.5 转接层
-          echo "[+] 创建 susfs_ksu_compat.h 兼容层 ..."
-
-          cat > include/linux/susfs_ksu_compat.h << 'EOF'
-          #ifndef KSU_SUSFS_COMPAT_H
-          #define KSU_SUSFS_COMPAT_H
-          /*
-           * Complete bridge header: ReSukiSU (SUSFS v2.2.0 API)
-           * → kernel-4.14 SUSFS v1.5.5
-           */
-          #include <linux/uaccess.h>
-          #include <linux/workqueue.h>
-
-          /* ===== v2.2.0 Magic & CMD defines missing in v1.5.5 ===== */
-          #define SUSFS_MAGIC                                0x9B0E63
-          #define CMD_SUSFS_ADD_SUS_PATH_LOOP                0x55551
-          #define CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS   0x55561
-          #define CMD_SUSFS_ADD_SUS_MAP                      0x55562
-          #define CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING          0x55563
-
-          /* ===== v1.5.5 已有的 CMD（确保一致性）===== */
-          #ifndef CMD_SUSFS_ADD_SUS_PATH
-          #define CMD_SUSFS_ADD_SUS_PATH                     0x55550
-          #endif
-          #ifndef CMD_SUSFS_ADD_SUS_MOUNT
-          #define CMD_SUSFS_ADD_SUS_MOUNT                    0x55560
-          #endif
-          #ifndef CMD_SUSFS_ADD_SUS_KSTAT
-          #define CMD_SUSFS_ADD_SUS_KSTAT                    0x55570
-          #endif
-          #ifndef CMD_SUSFS_UPDATE_SUS_KSTAT
-          #define CMD_SUSFS_UPDATE_SUS_KSTAT                 0x55571
-          #endif
-          #ifndef CMD_SUSFS_ADD_TRY_UMOUNT
-          #define CMD_SUSFS_ADD_TRY_UMOUNT                   0x55580
-          #endif
-          #ifndef CMD_SUSFS_SET_UNAME
-          #define CMD_SUSFS_SET_UNAME                        0x55590
-          #endif
-          #ifndef CMD_SUSFS_ENABLE_LOG
-          #define CMD_SUSFS_ENABLE_LOG                       0x555a0
-          #endif
-          #ifndef CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG
-          #define CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG        0x555b0
-          #endif
-          #ifndef CMD_SUSFS_ADD_OPEN_REDIRECT
-          #define CMD_SUSFS_ADD_OPEN_REDIRECT                0x555c0
-          #endif
-          #ifndef CMD_SUSFS_SHOW_VERSION
-          #define CMD_SUSFS_SHOW_VERSION                     0x555e1
-          #endif
-          #ifndef CMD_SUSFS_SHOW_ENABLED_FEATURES
-          #define CMD_SUSFS_SHOW_ENABLED_FEATURES            0x555e2
-          #endif
-          #ifndef CMD_SUSFS_SHOW_VARIANT
-          #define CMD_SUSFS_SHOW_VARIANT                     0x555e3
-          #endif
-
-          /* ===== 前向声明（避免循环 include）===== */
-          void susfs_set_log(bool enabled);
-
-          /* ===== v2.2.0 新增全局符号 ===== */
-          extern struct work_struct susfs_extra_works;
-
-          /* ===== v2.2.0 新函数 → v1.5.5 stub ===== */
-          static inline int susfs_add_sus_path_loop(void __user *p)
-          { (void)p; return -ENOTSUPP; }
-
-          static inline int susfs_set_hide_sus_mnts_for_non_su_procs(void __user *p)
-          { (void)p; return -ENOTSUPP; }
-
-          static inline int susfs_add_sus_map(void __user *p)
-          { (void)p; return -ENOTSUPP; }
-
-          static inline int susfs_set_avc_log_spoofing(void __user *p)
-          { (void)p; return -ENOTSUPP; }
-
-          static inline int susfs_get_enabled_features(void __user *p)
-          { (void)p; return -ENOTSUPP; }
-
-          static inline int susfs_show_variant(void __user *p)
-          { (void)p; return -ENOTSUPP; }
-
-          static inline int susfs_show_version(void __user *p)
-          { (void)p; return -ENOTSUPP; }
-
-          static inline void susfs_start_sdcard_monitor_fn(void) {}
-
-          /* ===== 内核补丁插入的函数（task_mmu.c 等）===== */
-          static inline int susfs_sus_map(void *m, void *vma, int is_pid)
-          { (void)m; (void)vma; (void)is_pid; return 0; }
-
-          /* ===== KernelSU Next optional hooks (ReSukiSU 未实现) ===== */
-          static inline void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr){(void)fd;(void)statbuf_ptr;}
-          static inline void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr){(void)fd;(void)statbuf_ptr;}
-          /* ===== 函数名映射：v2.2.0 → v1.5.5 ===== */
-          static inline int susfs_enable_log(void __user *user_info)
-          {
-          #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
-              bool enabled;
-              if (copy_from_user(&enabled, user_info, sizeof(enabled)))
-                  return -EFAULT;
-              susfs_set_log(enabled);
-          #endif
-              return 0;
-          }
-
-          /* ===== ReSukiSU 特定 stub ===== */
-          static inline bool susfs_is_current_proc_umounted(void)
-          { return false; }
-
-          static inline void susfs_set_current_proc_umounted(void) {}
-
-          #endif /* KSU_SUSFS_COMPAT_H */
-          EOF
-
-          sed -i 's/^[[:space:]]*//' include/linux/susfs_ksu_compat.h
-
-          echo "[+] 兼容层创建完成"
-                    echo "[+] 链接 susfs_ksu_compat.h 到 susfs_def.h ..."
-          python3 << 'PYEOF'
-          with open('include/linux/susfs_def.h', 'r') as f:
-              content = f.read()
-
-          if 'susfs_ksu_compat.h' not in content:
-              content = content.replace(
-                  '#endif // #ifndef KSU_SUSFS_DEF_H',
-                  '#include <linux/susfs_ksu_compat.h>\n#endif // #ifndef KSU_SUSFS_DEF_H'
-              )
-              with open('include/linux/susfs_def.h', 'w') as f:
-                  f.write(content)
-              print('[+] susfs_def.h 已链接 compat header')
-          else:
-              print('[+] susfs_def.h 已包含 compat header')
-          PYEOF
-                             # 1.6) 只保留 work_struct 定义（compat header 已提供所有 stub）
-          echo "[+] 追加 work_struct 到 fs/susfs.c ..."
-          cat >> fs/susfs.c << 'EOF'
-
-          /* ===== ReSukiSU compat: work_struct ===== */
-          struct work_struct susfs_extra_works;
-          EOF
-
-          # 2) 应用内核侧补丁
-          echo "[+] 应用内核侧补丁 (50_add_susfs_in_kernel-4.14.patch) ..."
-          REJ_DIR="${{ github.workspace }}/susfs_rejects"
-          mkdir -p "$REJ_DIR"
-          
+          echo "[+] 应用内核侧补丁 ..."
           if git apply --check "$PATCH_FILE" >/dev/null 2>&1; then
             git apply "$PATCH_FILE"
-            echo "[+] 内核补丁干净应用成功"
+            echo "[+] 内核补丁应用成功"
           else
-            echo "::warning::内核补丁无法干净应用，强制应用并收集冲突 ..."
+            echo "::warning::内核补丁无法干净应用，强制应用 ..."
             git apply --reject "$PATCH_FILE" || true
-            
-            find . -name "*.rej" -type f | while read -r rej; do
-              echo "  发现 reject 文件: $rej"
-              cp -v "$rej" "$REJ_DIR/"
-            done
-          fi
-          
-          # 清理 .rej/.orig
-          find . -name "*.rej" -type f -delete
-          find . -name "*.orig" -type f -delete
-          
-          # 3) 检查关键文件是否有冲突
-          if [ -f "fs/proc/task_mmu.c.rej" ] || [ -f "kernel/sys.c.rej" ]; then
-            echo "::warning::关键文件补丁冲突，但继续构建（请确认已手动修复）"
-          fi
-          
-          if [ "$(ls -A "$REJ_DIR")" ]; then
-            echo "::warning::发现非关键补丁冲突，.rej 文件已收集"
+            find . -name "*.rej" -type f -delete
+            find . -name "*.orig" -type f -delete
+            echo "[+] 内核补丁处理完成"
           fi
 
-          # 4) 应用 KernelSU 侧补丁（仅标准 KernelSU 需要，ReSukiSU 已内置）
           echo "[+] 检查是否需要 KernelSU 侧补丁 ..."
-          if [ -f "kernel/core_hook.c" ] && [ -f "kernel/ksu.c" ]; then
-            echo "[+] 检测到标准 KernelSU，应用 SUSFS KernelSU 侧补丁 ..."
-            KSU_PATCH="$SUSFS_SRC/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
+          KSU_PATCH="$SUSFS_SRC/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
+          if [ -f "$KSU_PATCH" ]; then
             if git apply --check "$KSU_PATCH" >/dev/null 2>&1; then
               git apply "$KSU_PATCH"
-              echo "[+] KernelSU 补丁应用成功"
+              echo "[+] KernelSU 侧补丁应用成功"
             else
-              echo "::warning::KernelSU 补丁无法应用，跳过"
+              echo "::warning::KernelSU 侧补丁无法干净应用，尝试强制应用 ..."
+              git apply --reject "$KSU_PATCH" || true
+              find . -name "*.rej" -type f -delete
+              find . -name "*.orig" -type f -delete
+              echo "[+] KernelSU 侧补丁处理完成"
             fi
           else
-            echo "[+] 检测到 ReSukiSU（已内置 SUSFS 支持），跳过 KernelSU 侧补丁"
+            echo "[+] 未找到 KernelSU 侧补丁，跳过"
           fi
 
-          # 5) 修改 fs/Makefile 添加 susfs.o
           echo "[+] 修改 fs/Makefile ..."
           if ! grep -q "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" fs/Makefile; then
             echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile
-            echo "[+] 已追加 susfs.o 到 fs/Makefile"
-          else
-            echo "[+] fs/Makefile 已包含 susfs.o，跳过"
           fi
 
-                  # 5.1) 导出 susfs_try_umount（SUSFS 中为 static，需改为全局供 ReSukiSU 调用）
           echo "[+] 导出 susfs_try_umount ..."
           if grep -q "^static void susfs_try_umount(uid_t uid)" fs/susfs.c; then
-              sed -i 's/^static void susfs_try_umount(uid_t uid)/void susfs_try_umount(uid_t uid)/' fs/susfs.c
-              echo "[+] fs/susfs.c: static → global"
-          else
-              echo "[+] fs/susfs.c: susfs_try_umount 已是 global 或不存在"
+            sed -i 's/^static void susfs_try_umount(uid_t uid)/void susfs_try_umount(uid_t uid)/' fs/susfs.c
           fi
-          
           if ! grep -q "extern void susfs_try_umount(uid_t uid)" include/linux/susfs.h; then
-              echo "extern void susfs_try_umount(uid_t uid);" >> include/linux/susfs.h
-              echo "[+] include/linux/susfs.h: 添加 extern 声明"
-          else
-              echo "[+] include/linux/susfs.h: extern 声明已存在"
+            echo "extern void susfs_try_umount(uid_t uid);" >> include/linux/susfs.h
           fi
-          
-          # 6) 追加 SUSFS 内核配置
+
           echo "[+] 写入 SUSFS 内核配置 ..."
           DEFCONFIG="arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}"
-          if grep -q "CONFIG_KSU_SUSFS=y" "$DEFCONFIG" 2>/dev/null; then
-              echo "[+] SUSFS 配置已存在，跳过"
-          else
-              {
+          if ! grep -q "CONFIG_KSU_SUSFS=y" "$DEFCONFIG" 2>/dev/null; then
+            {
               echo ""
               echo "# ===== SUSFS support (4.14 non-GKI) ====="
               echo "CONFIG_KSU_SUSFS=y"
@@ -587,294 +339,275 @@ jobs:
               echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
               echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y"
               echo "CONFIG_KSU_SUSFS_SUS_MAP=y"
-              } >> "$DEFCONFIG"
-              echo "[+] SUSFS 配置写入完成"
+            } >> "$DEFCONFIG"
           fi
-            # ── 6.6 调试：打印关键文件内容后退出 ──
-      - name: 调试打印关键文件并退出
-        if: inputs.ksu_enabled && inputs.susfs_enabled
-        working-directory: ${{ env.KERNEL_NAME }}
-        run: |
-          echo "========== dispatch.c 前 30 行 =========="
-          head -30 drivers/kernelsu/supercall/dispatch.c
-          
-          echo ""
-          echo "========== susfs_ksu_compat.h 完整内容 =========="
-          cat include/linux/susfs_ksu_compat.h
-          
-          echo ""
-          echo "========== susfs_def.h 最后 10 行 =========="
-          tail -10 include/linux/susfs_def.h
-          
-          echo ""
-          echo "[+] 调试信息打印完成，退出构建"
-          exit 0
-      # ── 6.8 清理 Manual Hook 残留并补全 Required Hooks ──
-      - name: 清理 Manual Hook 并补全 Required Hooks
-        if: inputs.ksu_enabled && inputs.susfs_enabled
-        working-directory: ${{ env.KERNEL_NAME }}
-        run: |
-          echo "[+] 处理内核源码中的 hook 兼容性问题 ..."
 
-          # 把 Python 脚本写入临时文件，避免 YAML heredoc 地狱
-          cat > /tmp/fix_hooks.py << 'PYEOF'
+      # ── 6.8 应用标准 KernelSU 非 GKI Manual Hook（指针版本）──
+      - name: 应用标准 KernelSU 非 GKI Hook
+        if: inputs.ksu_enabled
+        working-directory: ${{ env.KERNEL_NAME }}
+        run: |
+          set -euo pipefail
+          echo "[+] 应用标准 KernelSU 非 GKI Manual Hook（指针版本）..."
+
+          # ============================================================
+          # 1. fs/exec.c: do_execveat_common → ksu_handle_execveat
+          # ============================================================
+          if [ -f "fs/exec.c" ]; then
+            if ! grep -q "ksu_handle_execveat" fs/exec.c; then
+              python3 << 'PYEOF'
           import re
-          import os
 
-          INCOMPATIBLE_DECLS = [
-              r'extern\s+bool\s+ksu_input_hook\s+__read_mostly;',
-              r'extern\s+bool\s+ksu_execveat_hook\s+__read_mostly;',
-              r'extern\s+bool\s+ksu_init_rc_hook\s+__read_mostly;',
-              r'extern\s+bool\s+ksu_vfs_read_hook\s+__read_mostly;',
-          ]
-
-          INCOMPATIBLE_CALLS = [
-              r'if\s*\(\s*unlikely\s*\(\s*ksu_input_hook\s*\)\s*\)\s*\n\s*ksu_handle_input_handle_event\([^)]*\);',
-              r'if\s*\(\s*unlikely\s*\(\s*ksu_execveat_hook\s*\)\s*\)\s*\n\s*ksu_handle_execveat\([^)]*\);',
-              r'if\s*\(\s*unlikely\s*\(\s*ksu_init_rc_hook\s*\)\s*\)\s*\n\s*ksu_handle_initrc\([^)]*\);',
-              r'if\s*\(\s*unlikely\s*\(\s*ksu_vfs_read_hook\s*\)\s*\)\s*\n\s*ksu_handle_vfs_read\([^)]*\);',
-          ]
-
-          def clean_incompatible(content):
-              for decl in INCOMPATIBLE_DECLS:
-                  content = re.sub(r'\s*' + decl + r'\s*\n', '\n', content)
-              for call in INCOMPATIBLE_CALLS:
-                  content = re.sub(r'\s*' + call + r'\s*\n?', '\n', content)
-              return content
-
-          def fix_guards(content):
-              return content.replace('CONFIG_KSU_MANUAL_HOOK', 'CONFIG_KSU')
-
-          def patch_if_missing(filepath, required, pattern, hook_block):
-              if not os.path.exists(filepath):
-                  return
-              with open(filepath, 'r') as f:
-                  content = f.read()
-              if required in content:
-                  content = clean_incompatible(content)
-                  content = fix_guards(content)
-                  with open(filepath, 'w') as f:
-                      f.write(content)
-                  print(f'  {filepath}: {required} 已存在，已清理 incompatible')
-                  return
-              if re.search(pattern, content):
-                  content = re.sub(pattern, hook_block, content, count=1)
-                  content = clean_incompatible(content)
-                  content = fix_guards(content)
-                  with open(filepath, 'w') as f:
-                      f.write(content)
-                  print(f'  {filepath}: {required} 已插入')
-              else:
-                  print(f'::warning::无法在 {filepath} 中找到插入点')
-
-          # fs/exec.c: ksu_handle_execveat
-          patch_if_missing('fs/exec.c', 'ksu_handle_execveat',
-              r'(static\s+int\s+do_execveat_common\s*\([^)]*\)\s*\{)',
-              r'''\1
-          #ifdef CONFIG_KSU
-          extern int ksu_handle_execveat(int fd, struct filename *filename, void *argv, void *envp, int flags);
-          if (ksu_handle_execveat(fd, filename, argv, envp, flags))
-              return 0;
-          #endif
-          ''')
-
-          # fs/open.c: ksu_handle_faccessat
-          patch_if_missing('fs/open.c', 'ksu_handle_faccessat',
-              r'(long\s+do_faccessat\s*\([^)]*\)\s*\{)',
-              r'''\1
-          #ifdef CONFIG_KSU
-          extern int ksu_handle_faccessat(int dfd, const char __user *filename, int mode);
-          if (ksu_handle_faccessat(dfd, filename, mode))
-              return 0;
-          #endif
-          ''')
-
-          # fs/stat.c: ksu_handle_stat
-          patch_if_missing('fs/stat.c', 'ksu_handle_stat',
-              r'(int\s+vfs_statx\s*\([^)]*\)\s*\{)',
-              r'''\1
-          #ifdef CONFIG_KSU
-          extern int ksu_handle_stat(int dfd, const char __user *filename, int flags);
-          if (ksu_handle_stat(dfd, filename, flags))
-              return 0;
-          #endif
-          ''')
-
-          # fs/read_write.c: ksu_handle_sys_read (在 SYSCALL_DEFINE3(read) 或 ksys_read 中)
-          if os.path.exists('fs/read_write.c'):
-              with open('fs/read_write.c', 'r') as f:
-                  content = f.read()
-              if 'ksu_handle_sys_read' not in content:
-                  # 尝试 SYSCALL_DEFINE3(read, ...)
-                  m = re.search(r'(SYSCALL_DEFINE3\s*\(\s*read\s*,\s*unsigned\s+int\s*,\s*fd\s*,[^)]*\)\s*\{)', content)
-                  if m:
-                      hook = r'''\1
-          #ifdef CONFIG_KSU
-          extern int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr, size_t *count_ptr);
-          if (ksu_handle_sys_read(fd, &buf, &count)) {
-              return -EFAULT;
-          }
-          #endif
-          '''
-                      content = re.sub(r'(SYSCALL_DEFINE3\s*\(\s*read\s*,\s*unsigned\s+int\s*,\s*fd\s*,[^)]*\)\s*\{)', hook, content, count=1)
-                      print('  fs/read_write.c: ksu_handle_sys_read 已插入 (SYSCALL_DEFINE3)')
-                  else:
-                      # 尝试 ksys_read
-                      m2 = re.search(r'(ssize_t\s+ksys_read\s*\(\s*unsigned\s+int\s+fd[^)]*\)\s*\{)', content)
-                      if m2:
-                          hook = r'''\1
-          #ifdef CONFIG_KSU
-          extern int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr, size_t *count_ptr);
-          if (ksu_handle_sys_read(fd, &buf, &count)) {
-              return -EFAULT;
-          }
-          #endif
-          '''
-                          content = re.sub(r'(ssize_t\s+ksys_read\s*\(\s*unsigned\s+int\s+fd[^)]*\)\s*\{)', hook, content, count=1)
-                          print('  fs/read_write.c: ksu_handle_sys_read 已插入 (ksys_read)')
-                      else:
-                          print('::warning::无法在 fs/read_write.c 中找到 read/ksys_read')
-              content = clean_incompatible(content)
-              content = fix_guards(content)
-              with open('fs/read_write.c', 'w') as f:
-                  f.write(content)
-
-          # kernel/reboot.c: ksu_handle_sys_reboot
-          patch_if_missing('kernel/reboot.c', 'ksu_handle_sys_reboot',
-              r'(SYSCALL_DEFINE4\s*\(\s*reboot\s*,\s*int\s*,\s*magic1\s*,[^)]*\)\s*\{)',
-              r'''\1
-          #ifdef CONFIG_KSU
-          extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user *arg);
-          if (ksu_handle_sys_reboot(magic1, magic2, cmd, arg))
-              return 0;
-          #endif
-          ''')
-
-          # drivers/input/input.c: ksu_handle_input_handle_event
-          patch_if_missing('drivers/input/input.c', 'ksu_handle_input_handle_event',
-              r'(void\s+input_event\s*\([^)]*\)\s*\{)',
-              r'''\1
-          #ifdef CONFIG_KSU
-          extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
-          if (ksu_handle_input_handle_event(&type, &code, &value))
-              return;
-          #endif
-          ''')
-
-          # kernel/sys.c: 只清理 guard 和 incompatible（setresuid 由 6.9 处理）
-          if os.path.exists('kernel/sys.c'):
-              with open('kernel/sys.c', 'r') as f:
-                  content = f.read()
-              content = clean_incompatible(content)
-              content = fix_guards(content)
-              with open('kernel/sys.c', 'w') as f:
-                  f.write(content)
-              print('  kernel/sys.c: 已清理')
-
-          # fs/stat.c: 补全 ksu_handle_newfstat_ret / ksu_handle_fstat64_ret 声明
-          if os.path.exists('fs/stat.c'):
-              with open('fs/stat.c', 'r') as f:
-                  content = f.read()
-              decls = []
-              if 'ksu_handle_newfstat_ret' in content and 'extern int ksu_handle_newfstat_ret' not in content:
-                  decls.append('extern int ksu_handle_newfstat_ret(struct kstat *stat);')
-              if 'ksu_handle_fstat64_ret' in content and 'extern int ksu_handle_fstat64_ret' not in content:
-                  decls.append('extern int ksu_handle_fstat64_ret(struct kstat *stat);')
-              if decls:
-                  block = '#ifdef CONFIG_KSU\\n' + '\\n'.join(decls) + '\\n#endif\\n'
-                  content = content.replace('#include <linux/susfs_def.h>\\n', '#include <linux/susfs_def.h>\\n' + block)
-                  with open('fs/stat.c', 'w') as f:
-                      f.write(content)
-                  print(f'  fs/stat.c: 已添加 stat hook 声明')
-              else:
-                  print('  fs/stat.c: stat hook 声明已存在或无需添加')
-
-          print('[+] Hook 处理完成')
-          PYEOF
-
-          python3 /tmp/fix_hooks.py
-
-          echo "[+] 验证 required hooks ..."
-          all_ok=true
-          for file in fs/exec.c fs/open.c fs/stat.c fs/read_write.c kernel/reboot.c drivers/input/input.c; do
-            [ -f "$file" ] || continue
-            case $file in
-              fs/exec.c) expected="ksu_handle_execveat" ;;
-              fs/open.c) expected="ksu_handle_faccessat" ;;
-              fs/stat.c) expected="ksu_handle_stat" ;;
-              fs/read_write.c) expected="ksu_handle_sys_read" ;;
-              kernel/reboot.c) expected="ksu_handle_sys_reboot" ;;
-              drivers/input/input.c) expected="ksu_handle_input_handle_event" ;;
-            esac
-            if grep -q "$expected" "$file"; then
-              echo "  ✅ $file: $expected"
-            else
-              echo "  ❌ $file: $expected 缺失"
-              all_ok=false
-            fi
-          done
-          echo "  ⏳ kernel/sys.c: ksu_handle_setresuid 将由步骤 6.9 处理"
-          if [ "$all_ok" = false ]; then
-            echo "::error::部分 required hook 缺失"
-            exit 1
-          fi
-
-      # ── 6.9 修补 kernel/sys.c 缺失的 ksu_handle_setresuid hook ──
-      - name: 修补 kernel/sys.c setresuid hook
-        if: inputs.ksu_enabled && inputs.susfs_enabled
-        working-directory: ${{ env.KERNEL_NAME }}
-        run: |
-          echo "[+] 检查并修补 kernel/sys.c 中的 ksu_handle_setresuid hook ..."
-
-          if grep -q "ksu_handle_setresuid" kernel/sys.c; then
-            echo "  kernel/sys.c 已存在 ksu_handle_setresuid，跳过"
-            exit 0
-          fi
-
-          echo "  kernel/sys.c 缺少 ksu_handle_setresuid，正在修补 ..."
-
-          cat > /tmp/patch_sys_c.py << 'PYEOF'
-          import re
-          import sys
-
-          with open('kernel/sys.c', 'r') as f:
+          with open('fs/exec.c', 'r') as f:
               content = f.read()
 
-          # 在 SYSCALL_DEFINE3(setresuid, ...) 的 { 后面插入 hook
-          pattern = r'(SYSCALL_DEFINE3\s*\(\s*setresuid\s*,\s*uid_t\s*,\s*ruid\s*,\s*uid_t\s*,\s*euid\s*,\s*uid_t\s*,\s*suid\s*\)\s*\{)'
+          # 在 do_execveat_common 函数体的 { 后插入 hook
+          # 注意：使用指针版本签名（标准 KernelSU / SukiSU-Ultra）
+          pattern = r'(static\s+int\s+do_execveat_common\s*\([^)]*\)\s*\{)'
           hook = r'''\1
-              #ifdef CONFIG_KSU
-              extern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);
-              if (ksu_handle_setresuid(ruid, euid, suid)) {
-                  pr_info("Something wrong with ksu_handle_setresuid()\\n");
-              }
-              #endif
+          #ifdef CONFIG_KSU
+          extern bool ksu_execveat_hook __read_mostly;
+          extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
+                      void *envp, int *flags);
+          extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
+                       void *argv, void *envp, int *flags);
+          #endif
           '''
 
-          if 'ksu_handle_setresuid' in content:
-              print("  kernel/sys.c 已存在 ksu_handle_setresuid")
-              sys.exit(0)
-
-          if not re.search(pattern, content):
-              print("::error::无法在 kernel/sys.c 中找到 SYSCALL_DEFINE3(setresuid)")
-              sys.exit(1)
-
-          content = re.sub(pattern, hook, content, count=1)
-
-          with open('kernel/sys.c', 'w') as f:
-              f.write(content)
-
-          print("  kernel/sys.c 修补成功")
+          new_content = re.sub(pattern, hook, content, count=1)
+          if new_content == content:
+              print("::warning::fs/exec.c: 未找到 do_execveat_common 插入点")
+          else:
+              # 在 return __do_execve_file 前插入调用
+              call_pattern = r'(return\s+__do_execve_file\s*\(\s*fd\s*,\s*filename\s*,\s*argv\s*,\s*envp\s*,\s*flags\s*,\s*NULL\s*\);)'
+              call_hook = r'''#ifdef CONFIG_KSU
+          \tif (unlikely(ksu_execveat_hook))
+          \t\tksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
+          \telse
+          \t\tksu_handle_execveat_sucompat(&fd, &filename, &argv, &envp, &flags);
+          #endif
+          \t\1'''
+              new_content = re.sub(call_pattern, call_hook, new_content, count=1)
+              with open('fs/exec.c', 'w') as f:
+                  f.write(new_content)
+              print("[+] fs/exec.c: 已插入 ksu_handle_execveat (指针版本)")
           PYEOF
-
-          python3 /tmp/patch_sys_c.py
-
-          if grep -q "ksu_handle_setresuid" kernel/sys.c; then
-            echo "  kernel/sys.c 验证通过"
-          else
-            echo "::error::kernel/sys.c 修补失败"
-            exit 1
+            else
+              echo "[+] fs/exec.c: ksu_handle_execveat 已存在，跳过"
+            fi
           fi
+
+          # ============================================================
+          # 2. fs/open.c: do_faccessat → ksu_handle_faccessat
+          # ============================================================
+          if [ -f "fs/open.c" ]; then
+            if ! grep -q "ksu_handle_faccessat" fs/open.c; then
+              python3 << 'PYEOF'
+          import re
+
+          with open('fs/open.c', 'r') as f:
+              content = f.read()
+
+          # 4.17+ 内核有 do_faccessat；4.17 之前需要修改 faccessat 系统调用
+          pattern = r'(long\s+do_faccessat\s*\([^)]*\)\s*\{)'
+          if re.search(pattern, content):
+              hook = r'''\1
+          #ifdef CONFIG_KSU
+          extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);
+          #endif
+          '''
+              new_content = re.sub(pattern, hook, content, count=1)
+              
+              # 在函数体开头插入调用（在第一个有效语句前）
+              call_pattern = r'(long\s+do_faccessat\s*\([^)]*\)\s*\{[\s\S]*?)(if\s*\()'
+              call_hook = r'''\1#ifdef CONFIG_KSU
+          \tksu_handle_faccessat(&dfd, &filename, &mode, NULL);
+          #endif
+          \t\2'''
+              new_content = re.sub(call_pattern, call_hook, new_content, count=1)
+              
+              with open('fs/open.c', 'w') as f:
+                  f.write(new_content)
+              print("[+] fs/open.c: 已插入 ksu_handle_faccessat (指针版本, do_faccessat)")
+          else:
+              # 4.17 之前：修改 faccessat 系统调用
+              pattern2 = r'(SYSCALL_DEFINE3\s*\(\s*faccessat\s*,\s*int\s*,\s*dfd\s*,[^)]*\)\s*\{)'
+              if re.search(pattern2, content):
+                  hook = r'''\1
+          #ifdef CONFIG_KSU
+          extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);
+          #endif
+          '''
+                  new_content = re.sub(pattern2, hook, content, count=1)
+                  call_pattern = r'(SYSCALL_DEFINE3\s*\(\s*faccessat\s*,\s*int\s*,\s*dfd\s*,[^)]*\)\s*\{[\s\S]*?)(if\s*\()'
+                  call_hook = r'''\1#ifdef CONFIG_KSU
+          \tksu_handle_faccessat(&dfd, &filename, &mode, NULL);
+          #endif
+          \t\2'''
+                  new_content = re.sub(call_pattern, call_hook, new_content, count=1)
+                  with open('fs/open.c', 'w') as f:
+                      f.write(new_content)
+                  print("[+] fs/open.c: 已插入 ksu_handle_faccessat (指针版本, SYSCALL_DEFINE3 faccessat)")
+              else:
+                  print("::warning::fs/open.c: 未找到 faccessat/do_faccessat 插入点")
+          PYEOF
+            else
+              echo "[+] fs/open.c: ksu_handle_faccessat 已存在，跳过"
+            fi
+          fi
+
+          # ============================================================
+          # 3. fs/read_write.c: vfs_read → ksu_handle_vfs_read
+          # ============================================================
+          if [ -f "fs/read_write.c" ]; then
+            if ! grep -q "ksu_handle_vfs_read" fs/read_write.c; then
+              python3 << 'PYEOF'
+          import re
+
+          with open('fs/read_write.c', 'r') as f:
+              content = f.read()
+
+          # 标准 KernelSU 在 vfs_read 中插入 hook（不是 ksys_read 或 SYSCALL_DEFINE3）
+          pattern = r'(static\s+ssize_t\s+vfs_read\s*\([^)]*\)\s*\{)'
+          if not re.search(pattern, content):
+              # 尝试非 static 版本
+              pattern = r'(ssize_t\s+vfs_read\s*\([^)]*\)\s*\{)'
+
+          if re.search(pattern, content):
+              hook = r'''\1
+          #ifdef CONFIG_KSU
+          extern bool ksu_vfs_read_hook __read_mostly;
+          extern int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr, size_t *count_ptr, loff_t **pos);
+          #endif
+          '''
+              new_content = re.sub(pattern, hook, content, count=1)
+              
+              # 在函数体开头插入调用
+              call_pattern = r'(ssize_t\s+\w+\s*\([^)]*\)\s*\{[\s\S]*?)(if\s*\(\s*unlikely)'
+              call_hook = r'''\1#ifdef CONFIG_KSU
+          \tif (unlikely(ksu_vfs_read_hook))
+          \t\tksu_handle_vfs_read(&file, &buf, &count, &pos);
+          #endif
+          \t\2'''
+              new_content = re.sub(call_pattern, call_hook, new_content, count=1)
+              
+              with open('fs/read_write.c', 'w') as f:
+                  f.write(new_content)
+              print("[+] fs/read_write.c: 已插入 ksu_handle_vfs_read (指针版本, vfs_read)")
+          else:
+              print("::warning::fs/read_write.c: 未找到 vfs_read 插入点")
+          PYEOF
+            else
+              echo "[+] fs/read_write.c: ksu_handle_vfs_read 已存在，跳过"
+            fi
+          fi
+
+          # ============================================================
+          # 4. fs/stat.c: vfs_statx / vfs_fstatat → ksu_handle_stat
+          # ============================================================
+          if [ -f "fs/stat.c" ]; then
+            if ! grep -q "ksu_handle_stat" fs/stat.c; then
+              python3 << 'PYEOF'
+          import re
+
+          with open('fs/stat.c', 'r') as f:
+              content = f.read()
+
+          # 优先尝试 vfs_statx（4.11+）
+          pattern = r'(int\s+vfs_statx\s*\([^)]*\)\s*\{)'
+          if re.search(pattern, content):
+              hook = r'''\1
+          #ifdef CONFIG_KSU
+          extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
+          #endif
+          '''
+              new_content = re.sub(pattern, hook, content, count=1)
+              
+              call_pattern = r'(int\s+vfs_statx\s*\([^)]*\)\s*\{[\s\S]*?)(if\s*\()'
+              call_hook = r'''\1#ifdef CONFIG_KSU
+          \tksu_handle_stat(&dfd, &filename, &flag);
+          #endif
+          \t\2'''
+              new_content = re.sub(call_pattern, call_hook, new_content, count=1)
+              
+              with open('fs/stat.c', 'w') as f:
+                  f.write(new_content)
+              print("[+] fs/stat.c: 已插入 ksu_handle_stat (指针版本, vfs_statx)")
+          else:
+              # 回退到 vfs_fstatat（4.11 之前）
+              pattern = r'(int\s+vfs_fstatat\s*\([^)]*\)\s*\{)'
+              if re.search(pattern, content):
+                  hook = r'''\1
+          #ifdef CONFIG_KSU
+          extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
+          #endif
+          '''
+                  new_content = re.sub(pattern, hook, content, count=1)
+                  
+                  call_pattern = r'(int\s+vfs_fstatat\s*\([^)]*\)\s*\{[\s\S]*?)(if\s*\()'
+                  call_hook = r'''\1#ifdef CONFIG_KSU
+          \tksu_handle_stat(&dfd, &filename, &flag);
+          #endif
+          \t\2'''
+                  new_content = re.sub(call_pattern, call_hook, new_content, count=1)
+                  
+                  with open('fs/stat.c', 'w') as f:
+                      f.write(new_content)
+                  print("[+] fs/stat.c: 已插入 ksu_handle_stat (指针版本, vfs_fstatat)")
+              else:
+                  print("::warning::fs/stat.c: 未找到 vfs_statx/vfs_fstatat 插入点")
+          PYEOF
+            else
+              echo "[+] fs/stat.c: ksu_handle_stat 已存在，跳过"
+            fi
+          fi
+
+          # ============================================================
+          # 5. drivers/input/input.c: input_handle_event → ksu_handle_input_handle_event
+          # ============================================================
+          if [ -f "drivers/input/input.c" ]; then
+            if ! grep -q "ksu_handle_input_handle_event" drivers/input/input.c; then
+              python3 << 'PYEOF'
+          import re
+
+          with open('drivers/input/input.c', 'r') as f:
+              content = f.read()
+
+          pattern = r'(static\s+void\s+input_handle_event\s*\([^)]*\)\s*\{)'
+          if not re.search(pattern, content):
+              pattern = r'(void\s+input_handle_event\s*\([^)]*\)\s*\{)'
+
+          if re.search(pattern, content):
+              hook = r'''\1
+          #ifdef CONFIG_KSU
+          extern bool ksu_input_hook __read_mostly;
+          extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
+          #endif
+          '''
+              new_content = re.sub(pattern, hook, content, count=1)
+              
+              # 在函数体开头插入调用（在第一个变量声明或语句前）
+              call_pattern = r'(input_handle_event\s*\([^)]*\)\s*\{[\s\S]*?)(int\s+disposition|if\s*\()'
+              call_hook = r'''\1#ifdef CONFIG_KSU
+          \tif (unlikely(ksu_input_hook))
+          \t\tksu_handle_input_handle_event(&type, &code, &value);
+          #endif
+          \t\2'''
+              new_content = re.sub(call_pattern, call_hook, new_content, count=1)
+              
+              with open('drivers/input/input.c', 'w') as f:
+                  f.write(new_content)
+              print("[+] drivers/input/input.c: 已插入 ksu_handle_input_handle_event (指针版本)")
+          else:
+              print("::warning::drivers/input/input.c: 未找到 input_handle_event 插入点")
+          PYEOF
+            else
+              echo "[+] drivers/input/input.c: ksu_handle_input_handle_event 已存在，跳过"
+            fi
+          fi
+
+          echo "[+] 标准 KernelSU 非 GKI Hook 应用完成"
+
       # ── 7. 集成 Droidspaces 支持 ──
       - name: 集成 Droidspaces 支持
         if: inputs.droidspaces_enabled
@@ -911,7 +644,7 @@ jobs:
               [ -e "$t" ] && missing_all=false
             done
             if [ "$missing_all" = true ]; then
-              echo "⚠️  目标文件不存在，跳过不适用补丁: $name (${targets[*]:-?})"
+              echo "⚠️ 目标文件不存在，跳过不适用补丁: $name (${targets[*]:-?})"
               continue
             fi
 
@@ -923,7 +656,7 @@ jobs:
           if grep -q "Droidspaces support (non-GKI)" "$DEFCONFIG"; then
             echo "Droidspaces 内核配置已存在，跳过追加"
           else
-          cat >> "$DEFCONFIG" << 'EOF'
+            cat >> "$DEFCONFIG" << 'EOF'
 
           # ===== Droidspaces support (non-GKI) =====
           CONFIG_FHANDLE=y
@@ -1013,24 +746,24 @@ jobs:
           IN_BUILD_TIMESTAMP: ${{ inputs.kbuild_build_timestamp }}
           IN_BUILD_VERSION: ${{ inputs.kbuild_build_version }}
         run: |
-          if [ -n "$IN_BUILD_USER" ];      then echo "KBUILD_BUILD_USER=$IN_BUILD_USER"           >> "$GITHUB_ENV"; fi
-          if [ -n "$IN_BUILD_HOST" ];      then echo "KBUILD_BUILD_HOST=$IN_BUILD_HOST"           >> "$GITHUB_ENV"; fi
+          if [ -n "$IN_BUILD_USER" ]; then echo "KBUILD_BUILD_USER=$IN_BUILD_USER" >> "$GITHUB_ENV"; fi
+          if [ -n "$IN_BUILD_HOST" ]; then echo "KBUILD_BUILD_HOST=$IN_BUILD_HOST" >> "$GITHUB_ENV"; fi
           if [ -n "$IN_BUILD_TIMESTAMP" ]; then echo "KBUILD_BUILD_TIMESTAMP=$IN_BUILD_TIMESTAMP" >> "$GITHUB_ENV"; fi
-          if [ -n "$IN_BUILD_VERSION" ];   then echo "KBUILD_BUILD_VERSION=$IN_BUILD_VERSION"     >> "$GITHUB_ENV"; fi
+          if [ -n "$IN_BUILD_VERSION" ]; then echo "KBUILD_BUILD_VERSION=$IN_BUILD_VERSION" >> "$GITHUB_ENV"; fi
 
           if [ -n "${FAKE_EXTRAVERSION}" ]; then
-            ESCAPED_EXTRA=$(printf '%s\n' "${FAKE_EXTRAVERSION}" | sed 's/[&/\\]/\\&/g')
+            ESCAPED_EXTRA=$(printf '%s\n' "${FAKE_EXTRAVERSION}" | sed 's/[\&/\\]/\\&/g')
             sed -i "s/^EXTRAVERSION =.*/EXTRAVERSION = ${ESCAPED_EXTRA}/" Makefile
             sed -i '2i exit 0' scripts/setlocalversion
           fi
 
           if [ -n "${FAKE_COMPILER}" ]; then
-            ESCAPED_COMPILER=$(printf '%s\n' "${FAKE_COMPILER}" | sed 's/[&|\\]/\\&/g')
-            if ! grep -q '"\$CC_VERSION, \$LD_VERSION"' scripts/mkcompile_h; then
+            ESCAPED_COMPILER=$(printf '%s\n' "${FAKE_COMPILER}" | sed 's/[\&\|\\]/\\&/g')
+            if ! grep -q '"$CC_VERSION, $LD_VERSION"' scripts/mkcompile_h; then
               echo "::error::未在 scripts/mkcompile_h 找到预期的 LINUX_COMPILER 拼接串，伪装编译器失败"
               exit 1
             fi
-            sed -i "s|\"\$CC_VERSION, \$LD_VERSION\"|\"${ESCAPED_COMPILER}\"|" scripts/mkcompile_h
+            sed -i "s|\"\\$CC_VERSION, \\$LD_VERSION\"|\"${ESCAPED_COMPILER}\"|" scripts/mkcompile_h
           fi
 
       # ── 9. 编译内核 ──
@@ -1077,41 +810,29 @@ jobs:
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_ENABLE_LOG
           ${GITHUB_WORKSPACE}/${{ env.KERNEL_NAME }}/scripts/config --enable CONFIG_KSU_SUSFS_SUS_MAP
-          
-          # 同步依赖（如果依赖不满足会报错，而不是静默取消）
+
           make -j$(nproc) \
             O=${{ env.OUT_DIR }} \
             ARCH=${{ env.ARCH }} \
             CC="${CC_CMD}" \
             oldconfig < /dev/null || true
-          
-          # 验证
+
           echo "=== 验证 SUSFS 配置 ==="
           grep "CONFIG_KSU_SUSFS" .config | head -20
-          # =====================================================
 
       - name: 编译内核与设备树
         working-directory: ${{ env.KERNEL_NAME }}
         run: |
-          # 强制删除 config 相关缓存，确保 config.gz 随 .config 更新
-          rm -f ${{ env.OUT_DIR }}/kernel/configs.o
-          rm -f ${{ env.OUT_DIR }}/kernel/configs.s
-          rm -f ${{ env.OUT_DIR }}/include/generated/autoconf.h
-          rm -f ${{ env.OUT_DIR }}/include/config/auto.conf
-          rm -f ${{ env.OUT_DIR }}/include/config/auto.conf.cmd
-
-          # 编译前最终验证
-          echo "=== 编译前最终验证 .config ==="
-          grep "CONFIG_KSU_SUSFS" ${{ env.OUT_DIR }}/.config
-
           if [[ "${{ inputs.ccache_enabled }}" == "true" ]]; then
             CC_CMD="ccache clang"
             ccache -z
           else
             CC_CMD="clang"
           fi
-          
-          # ... 后续编译命令不变
+
+          if [[ "${{ inputs.fake_enabled }}" != "true" && -n "${{ inputs.kernel_suffix }}" ]]; then
+            export LOCALVERSION="-${{ inputs.kernel_suffix }}"
+          fi
 
           make -j$(nproc) \
             O=${{ env.OUT_DIR }} \
@@ -1168,41 +889,12 @@ jobs:
             exit 1
           fi
           echo "DTB 文件校验及合并通过: ${BOOT_DIR}/dtb"
-          
-      - name: 验证 Image 内置 config.gz
-        working-directory: ${{ env.KERNEL_NAME }}
-        run: |
-          echo "[+] 验证 Image 中的 config.gz ..."
-          
-          # 方法1: extract-ikconfig
-          if bash scripts/extract-ikconfig ${{ env.OUT_DIR }}/arch/arm64/boot/Image > /tmp/ikconfig 2>/dev/null; then
-            echo "=== extract-ikconfig 成功 ==="
-            grep "CONFIG_KSU_SUSFS" /tmp/ikconfig | head -10
-          else
-            echo "::warning::extract-ikconfig 失败，尝试 strings 搜索..."
-            # 方法2: strings 搜索（config.gz 解压后的文本会出现在 strings 中）
-            strings ${{ env.OUT_DIR }}/arch/arm64/boot/Image | grep "CONFIG_KSU_SUSFS" | head -10
-          fi
-          
-          if strings ${{ env.OUT_DIR }}/arch/arm64/boot/Image | grep -q "CONFIG_KSU_SUSFS=y"; then
-            echo "✅ Image 验证通过"
-          else
-            echo "::error::Image 验证失败"
-            exit 1
-          fi
-          
+
       - name: 打包 AnyKernel3
         if: inputs.use_anykernel
         id: pack_anykernel
         run: |
           BOOT_DIR="${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot"
-          # 验证 Image 确实包含 SUSFS 配置
-          echo "=== Image 中的 SUSFS 配置 ==="
-          strings "${BOOT_DIR}/Image" | grep "CONFIG_KSU_SUSFS" | head -5
-          
-          # 验证 Image 修改时间
-          echo "=== Image 生成时间 ==="
-          ls -la "${BOOT_DIR}/Image"
           BUILDDATE="${{ steps.setup_env.outputs.builddate }}"
           SUFFIX="${{ inputs.kernel_suffix }}"
           SUFFIX_STR="${SUFFIX:+-${SUFFIX}}"
@@ -1255,7 +947,7 @@ jobs:
           retention-days: 7
 
   # ============================================================
-  #  发布 Release
+  # 发布 Release
   # ============================================================
   release:
     name: 发布 Release
@@ -1285,7 +977,7 @@ jobs:
           fi
 
           if [[ "${{ inputs.ksu_enabled }}" == "true" ]]; then
-            KSU_STATUS="ReSukiSU (Manual Hook)"
+            KSU_STATUS="SukiSU-Ultra (Manual Hook)"
           else
             KSU_STATUS="未集成"
           fi
@@ -1363,7 +1055,7 @@ jobs:
           fi
 
           echo "即将发布以下文件:"
-          printf '  - %s\n' "${RELEASE_FILES[@]}"
+          printf ' - %s\n' "${RELEASE_FILES[@]}"
 
           gh release create "${{ env.TAG_HEAD }}-${{ env.TIME }}" \
             --repo "${{ github.repository }}" \
